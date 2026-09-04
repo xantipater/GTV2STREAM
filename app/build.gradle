@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Read the temporary credential from local.properties (or a Gradle project property)
+// so it never has to appear in tracked source files.
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+}
+def tmdbApiKey = (project.findProperty('tmdbApiKey') ?: localProperties.getProperty('tmdbApiKey', '')).toString().trim()
+def escapeBuildConfigString = { String value ->
+    '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r') + '"'
+}
+
+android {
+    namespace 'com.gtv2stream'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.gtv2stream'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0.0'
+        testInstrumentationRunner 'android.test.runner.AndroidJUnitRunner'
+        buildConfigField 'String', 'TMDB_API_KEY', escapeBuildConfigString(tmdbApiKey)
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+// The helper test harness is dependency-free and can run offline on this host.
+def helperTestClasses = layout.buildDirectory.dir('helper-test-classes')
+tasks.register('compileHelperTests', JavaCompile) {
+    dependsOn 'compileDebugJavaWithJavac'
+    source = fileTree('src/test/java')
+    classpath = files("${buildDir}/intermediates/javac/debug/compileDebugJavaWithJavac/classes")
+    destinationDirectory = helperTestClasses
+    options.release = 17
+}
+tasks.register('runHelperTests', JavaExec) {
+    dependsOn 'compileHelperTests'
+    classpath = files(helperTestClasses, "${buildDir}/intermediates/javac/debug/compileDebugJavaWithJavac/classes")
+    mainClass = 'com.gtv2stream.DeepLinkHelperTest'
+}

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GTV2STREAM</string>
+    <string name="app_subtitle">Google TV recommendations to Nuvio</string>
+    <string name="service_label">GTV2STREAM recommendation redirect</string>
+    <string name="service_description">Reads selected Google TV launcher recommendations and opens matching titles in Nuvio.</string>
+    <string name="tmdb_key_label">TMDB API key</string>
+    <string name="tmdb_key_hint">Paste your own TMDB v3 API key</string>
+    <string name="save_key">Save TMDB key</string>
+    <string name="open_accessibility">Open Accessibility Settings</string>
+    <string name="test_nuvio">Test Nuvio movie link</string>
+    <string name="service_status_title">Accessibility service</string>
+    <string name="status_line">%1$s: %2$s — %3$s</string>
+    <string name="status_enabled">Enabled</string>
+    <string name="status_disabled">Not enabled</string>
+    <string name="status_key_missing">TMDB key is not configured</string>
+    <string name="status_ready">Ready</string>
+    <string name="status_nuvio_missing">No Nuvio handler was found for the test link</string>
+    <string name="key_saved">TMDB key saved locally</string>
+    <string name="test_link_opened">Opening Nuvio test link</string>
+    <string name="invalid_key">Enter a valid-looking TMDB key (at least 10 characters)</string>
+    <string name="key_rejected">TMDB rejected this key; update it in GTV2STREAM</string>
+    <string name="missing_match_id">The TMDB result has no IMDb identifier</string>
+</resources>

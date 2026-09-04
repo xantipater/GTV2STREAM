@@ -1,0 +1,24 @@
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+
+# IDE metadata
+.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+
+# Signing material and local signing configuration
+*.jks
+*.keystore
+*.p12
+signing.properties
+keystore.properties
+
+# Local APK and bundle artifacts
+*.apk
+*.aab
+*.apks
+output-metadata.json
