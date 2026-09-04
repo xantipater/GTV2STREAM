@@ -50,10 +50,6 @@ adb shell am start -a android.intent.action.VIEW -d "nuvio://movie/tt0371746"
 
 If Nuvio is not installed or does not advertise the URI handler, GTV2STREAM shows a status Toast rather than assuming a package name.
 
-## Clean-room note
-
-GTV2STREAM is an independent clean-room implementation. It uses publicly observable Android interoperability behavior and behavioral inspiration from the [TvReccomendationBridge release page](https://github.com/Yushetf33/TvReccomendationBridge/releases/latest), but does not copy its source, assets, or line structure. GTV2STREAM is not affiliated with Google, Nuvio, or TvReccomendationBridge.
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
