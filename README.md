@@ -2,9 +2,15 @@
 
 GTV2STREAM is a small, independent Android TV companion that redirects a selected Google TV launcher recommendation to Nuvio. It does not host, stream, or provide media.
 
-## Why install with ADB?
+## Install
 
-Some Android/Google TV builds block accessibility services for sideloaded apps. Some also do not provide a usable restricted-settings toggle. On those affected builds, install the APK with [Windows over-network ADB](INSTALL.md#option-a-windows-over-network-adb) instead. ADB is not required on every device. If your device lets you enable the service normally, use Downloader or a USB stick as described in [INSTALL.md](INSTALL.md).
+- **[Install normally (Downloader or USB)](INSTALL.md)**
+- **[Install via ADB (Windows)](INSTALL_ADB.md)**
+
+Some Android/Google TV builds restrict accessibility services for sideloaded
+apps, so the ADB route may be needed when the required accessibility restricted
+setting cannot be enabled normally. If normal installation works, use the
+Downloader or USB guide.
 
 ## Behavior
 
@@ -24,17 +30,29 @@ Every resolved recommendation uses a deliberately fresh Nuvio task: GTV2STREAM r
 
 ## Setup on Google TV / Android TV
 
-1. Create your own TMDB v3 API key at <https://www.themoviedb.org/settings/api>.
-2. Build and sideload the debug APK; this project makes no Play Store support claim.
-3. Open GTV2STREAM, paste the key, and tap **Save TMDB key**. The key is stored only in the app's private local preferences and is never committed to source.
-4. Tap **Open Accessibility Settings**, select **GTV2STREAM recommendation redirect**, and enable it.
-5. Return to GTV2STREAM and confirm the visible service status says enabled and ready.
+For the released APK, start with either the [normal installation guide](INSTALL.md)
+or the [Windows ADB installation guide](INSTALL_ADB.md). The guides include the
+APK installation, TMDB key, accessibility service, Nuvio profile, usage, test,
+and troubleshooting steps.
 
-On Android 13 or newer, some builds block accessibility services for sideloaded apps and do not expose a usable restricted-settings toggle. On those devices, use the [Windows over-network ADB installation route](INSTALL.md#option-a-windows-over-network-adb), then reopen Accessibility Settings and enable GTV2STREAM.
+The basic setup is:
 
-## Install (users)
+1. Install the released APK using one of the two guides above. End users do
+   not need to build from source.
+2. Create your own TMDB v3 API key at
+   <https://www.themoviedb.org/settings/api>.
+3. Open GTV2STREAM, enter the key, and select **Save TMDB key**. The key is
+   stored only in the app's private local preferences and is never committed
+   to source.
+4. Select **Open Accessibility Settings**, choose **GTV2STREAM recommendation
+   redirect**, and enable it.
+5. Return to GTV2STREAM and confirm that the visible service status says
+   enabled and ready.
+6. If you use multiple Nuvio profiles, enable **Remember last profile** in
+   Nuvio.
 
-See [INSTALL.md](INSTALL.md) for a step-by-step install guide: sideload the APK, add your TMDB key, enable the accessibility service, and enable Nuvio's **Remember last profile**.
+Developers may build from source for development. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for the optional build workflow.
 
 ## Test the Nuvio URI directly
 

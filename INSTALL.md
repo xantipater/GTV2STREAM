@@ -1,147 +1,179 @@
-# GTV2STREAM — Install Guide
+# GTV2STREAM: Normal installation
 
-Turn a Google TV launcher recommendation into a Nuvio deep link. No computer
-needed for daily use; you only touch a PC once, to install the APK.
+This guide installs the released GTV2STREAM APK without ADB. It covers both
+Downloader and USB installation. After the APK is installed, it explains the
+TMDB key, accessibility service, Nuvio profile, and a complete test.
 
-## Why ADB may be needed
+## Why some TVs need the ADB guide
 
-Some Android/Google TV builds block sideloaded apps from enabling accessibility
-and have no usable restricted-settings toggle. On those builds, use ADB
-installation instead of Downloader or a file manager.
+Some Android TV builds restrict accessibility services for sideloaded apps.
+Those builds may not let you enable the required accessibility restricted
+setting through the normal installation path. If normal installation leaves
+the service unavailable, use the standalone [Install via ADB (Windows)
+guide](INSTALL_ADB.md). ADB is not required on every device, and it is not
+guaranteed to work on every Android build.
 
 ## What you need
 
-- A Google TV / Android TV device with Nuvio installed
-- The [GTV2STREAM-v1.0.0.apk](https://github.com/xantipater/GTV2STREAM/releases/download/v1.0.0/GTV2STREAM-v1.0.0.apk)
-- A free TMDB API key: create one at <https://www.themoviedb.org/settings/api>
-  (sign up, then Settings → API → Create → Developer)
+- A Google TV or Android TV with the Google TV home launcher.
+- Nuvio installed on the TV.
+- An internet connection on the TV.
+- The released APK:
+  [GTV2STREAM-v1.0.0.apk](https://github.com/xantipater/GTV2STREAM/releases/download/v1.0.0/GTV2STREAM-v1.0.0.apk)
+- Your own free TMDB v3 API key from
+  <https://www.themoviedb.org/settings/api>. GTV2STREAM does not provide a
+  shared key.
 
-## 1. Install the APK
+Use Downloader if your TV has the Play Store and internet access. Use the USB
+method if you can copy the APK to a USB stick and your TV supports USB storage.
+Downloader needs no computer. The USB method needs a computer or another
+device that can download and copy the APK.
 
-### Option A: Windows over-network ADB
+## Option 1: Install with Downloader
 
-Use this option when your Google TV blocks the accessibility service after
-sideloading. Your Windows PC and Google TV must be on the same local network.
-No USB cable is needed. Nuvio should already be installed on the TV.
+Downloader is the simplest normal installation route. Menu names can vary a
+little between Google TV and Android TV versions.
 
-1. On the Windows PC, download the official [Android SDK Platform-Tools for
-   Windows](https://dl.google.com/android/repository/platform-tools-latest-windows.zip)
-   ZIP and extract it.
-2. Download the
-   [GTV2STREAM-v1.0.0.apk](https://github.com/xantipater/GTV2STREAM/releases/download/v1.0.0/GTV2STREAM-v1.0.0.apk).
-   Put the APK file beside `adb.exe` in the extracted `platform-tools` folder.
-3. On the TV, open **Settings → System → About**. Select **Android TV OS
-   build** seven times to unlock Developer options. Menu names vary across
-   devices.
-4. Go back to **System → Developer options**. Turn on **USB debugging** and
-   **Network debugging** if your TV offers it. USB debugging alone does not
-   necessarily expose ADB on network port `5555`.
-5. Find the TV's IP address in **Settings → Network & Internet** by opening
-   the connected network.
-6. In Windows Explorer, open the `platform-tools` folder. Click the address
-   bar, type `cmd`, and press Enter.
-7. In the Command Prompt window, connect to the TV. Replace `TV_IP` with the
-   TV's actual IP address:
+1. On the TV, open the Play Store.
+2. Search for **Downloader by AFTVnews**, then install the official Downloader
+   app.
+3. Open Downloader.
+4. Enter this complete APK URL in Downloader. Enter the full address, not a
+   shortened code:
 
    ```text
-   adb connect TV_IP:5555
+   https://github.com/xantipater/GTV2STREAM/releases/download/v1.0.0/GTV2STREAM-v1.0.0.apk
    ```
 
-   Accept the debugging authorization prompt on the TV. If your TV does not
-   offer a direct network connection on port `5555`, use the pairing steps in
-   the first troubleshooting subsection below instead.
-8. Install the APK:
+5. Start the download and wait for the APK installer to appear.
+6. If Android asks whether Downloader may install unknown apps, open the
+   requested setting, allow Downloader, and return to the installer. This is
+   the ordinary APK installation permission. It is separate from the
+   accessibility restricted setting discussed above.
+7. Select **Install** and wait for the installation to finish.
+8. Select **Open** to launch GTV2STREAM. If you close the installer instead,
+   open GTV2STREAM from the TV app list.
+
+## Option 2: Install from a USB stick
+
+Use this method only with a TV that supports USB storage and a file manager
+that can open APK files.
+
+1. On a computer or another device that can download files, open the
+   [GTV2STREAM releases page](https://github.com/xantipater/GTV2STREAM/releases)
+   or download the direct APK from:
 
    ```text
-   adb install -r GTV2STREAM-v1.0.0.apk
+   https://github.com/xantipater/GTV2STREAM/releases/download/v1.0.0/GTV2STREAM-v1.0.0.apk
    ```
 
-   `Success` confirms the install.
+2. Download `GTV2STREAM-v1.0.0.apk`.
+3. Copy the APK to a USB stick, then safely eject the stick from the computer
+   or other device.
+4. Connect the USB stick to a USB port on the TV. If the TV does not support
+   USB storage, use Downloader or the [ADB guide](INSTALL_ADB.md) instead.
+5. On the TV, install and open a file manager that can read USB storage, such
+   as **X-plore**, if one is not already installed.
+6. In the file manager, browse to the USB stick and select
+   `GTV2STREAM-v1.0.0.apk`.
+7. If Android asks whether the file manager may install unknown apps, open the
+   requested setting, allow that file manager, and return to the installer.
+   This permission is for installing the APK and is not the accessibility
+   restricted setting.
+8. Select **Install**, wait for the installation to finish, and select
+   **Open**. You can remove the USB stick after the install is complete.
 
-After setup, you can turn off USB debugging and Network debugging. No PC is
-needed for daily use.
+## Configure GTV2STREAM after installation
 
-### Option B: Downloader
+Complete these steps after either normal installation method.
 
-On devices that allow the accessibility service normally, install Downloader
-from the Play Store, enter the [GTV2STREAM-v1.0.0.apk URL](https://github.com/xantipater/GTV2STREAM/releases/download/v1.0.0/GTV2STREAM-v1.0.0.apk), and install the APK.
-
-### Option C: USB stick
-
-On devices that allow the accessibility service normally, copy the APK to a
-USB stick, open it with a file manager such as X-plore, and install it. Allow
-the file manager to install unknown apps when prompted.
-
-## 2. Configure GTV2STREAM
-
-1. Open **GTV2STREAM** from the app list.
+1. Open **GTV2STREAM** from the TV app list.
 2. Enter your own TMDB **v3 API key**, not a v4 read access token. Create or
-   retrieve it at <https://www.themoviedb.org/settings/api>, then select
-   **Save TMDB key**.
+   retrieve it at <https://www.themoviedb.org/settings/api>.
+3. Select **Save TMDB key**. The key is stored privately in the app's local
+   storage on this TV. It is not shared with this project or committed to
+   source.
+4. Select **Open Accessibility Settings**.
+5. Select **GTV2STREAM recommendation redirect** and enable it.
+6. Return to GTV2STREAM and confirm that the service status says it is enabled
+   and ready.
+7. If you use more than one Nuvio profile, open Nuvio and enable **Remember
+   last profile**. GTV2STREAM deliberately starts Nuvio in a fresh task, so
+   this setting prevents the profile picker from appearing on every launch.
 
-   The key is stored only on your device, inside the app's private local storage.
+If the service cannot be enabled, follow the complete [Install via ADB
+(Windows) guide](INSTALL_ADB.md).
 
-3. Select **Open Accessibility Settings**, choose **GTV2STREAM recommendation
-   redirect**, and enable it.
-4. Return to GTV2STREAM and check that the visible service status says it is
-   enabled and ready.
-5. If you use multiple Nuvio profiles, enable **Remember last profile** in
-   Nuvio. GTV2STREAM intentionally launches Nuvio fresh each time, so this
-   keeps the launch on your profile instead of showing the profile picker.
+## Use and test GTV2STREAM
 
-## 3. Use it
+1. Return to the Google TV home screen.
+2. Focus a movie recommendation card and select it. A matched movie should
+   open in Nuvio.
+3. Repeat with a series recommendation card. A matched series should open in
+   Nuvio.
+4. You can also use the test button in GTV2STREAM's settings. It tests a
+   known movie and follows the same fresh Nuvio launch behavior.
+5. The links GTV2STREAM sends to Nuvio have these forms:
 
-On the Google TV home screen, focus a recommendation card and click it.
-Nuvio opens directly on that title.
+   - Movie: `nuvio://movie/<imdb-id>`
+   - Series: `nuvio://detail/tv/<imdb-id>`
 
-- Movies open as `nuvio://movie/<imdb-id>`
-- Shows open as `nuvio://detail/tv/<imdb-id>`
+   For example, a movie link is `nuvio://movie/tt0371746`, and a series link
+   is `nuvio://detail/tv/tt0944947`.
 
-Ads, sponsored cards, and YouTube items are ignored on purpose.
+GTV2STREAM ignores advertisements, sponsored cards, and YouTube items. Test
+with a real movie or series card on the Google TV home screen rather than an
+advertisement or a card inside YouTube.
 
 ## Troubleshooting
 
-### Optional: Wireless-debugging pairing
+### Accessibility service is unavailable or cannot be enabled
 
-Some TVs require a pairing code instead of the direct `:5555` connection. Use
-this flow instead of step 7 above, before installing the APK:
+Some TV builds restrict accessibility for sideloaded apps. Use the standalone
+[Install via ADB (Windows) guide](INSTALL_ADB.md). ADB is a separate install
+route and is not guaranteed on every Android build.
 
-1. On the TV, open **Wireless debugging → Pair device with pairing code**.
-2. In the `platform-tools` Command Prompt, replace `TV_IP` and
-   `PAIRING_PORT` with the values shown by the TV:
+### TMDB key is rejected
 
-   ```text
-   adb pair TV_IP:PAIRING_PORT
-   ```
+Confirm that you entered your own TMDB **v3 API key**, which is the API key
+value from the TMDB API settings page. Do not enter a TMDB v4 read access
+token. Save the key again after copying it carefully.
 
-3. Enter the pairing code shown on the TV.
-4. On the main **Wireless debugging** screen, find the separate connection
-   port. Replace `TV_IP` and `CONNECTION_PORT` with those values:
+### The service is off or nothing happens when a card is selected
 
-   ```text
-   adb connect TV_IP:CONNECTION_PORT
-   ```
+Open GTV2STREAM and check that its status says the accessibility service is
+enabled and ready. If it is off, return to Accessibility Settings and enable
+**GTV2STREAM recommendation redirect** again. Then test a normal movie or
+series card on the Google TV home screen.
 
-   The pairing port and connection port are different. Pairing authorizes the
-   PC, while connecting attaches ADB to the TV. Then continue with the
-   `adb install -r GTV2STREAM-v1.0.0.apk` command above.
+### Nuvio opens a profile picker every time
 
-### Other issues
+Enable **Remember last profile** in Nuvio. This is expected when Nuvio has
+multiple profiles and GTV2STREAM starts a fresh task.
 
-- **Nothing happens on click:** reopen GTV2STREAM and confirm the status
-  line shows the service enabled and ready; then re-check that the accessibility
-  service is still on (sometimes toggles off after app updates).
-- **Opens the wrong title or an old one:** make sure the accessibility
-  service is enabled, and that you're clicking cards on the Google TV home
-  screen (not inside YouTube or another app).
-- **Nuvio shows "Who's watching?" every time:** enable **Remember last
-  profile** in Nuvio (section 2).
-- **"TMDB key invalid":** you need the **v3 API key** (32-character hash),
-  not a v4 read access token. Re-copy from your TMDB account's API page.
-- **Wiped your key or moved TVs:** just repeat section 2. If you moved to a
-  different TV, repeat the install steps in section 1 first.
+### The wrong title opens, or no title opens
+
+Make sure the card is a Google TV home recommendation, not an advertisement,
+sponsored card, or YouTube item. Confirm that Nuvio is installed and that the
+accessibility service status is enabled and ready.
+
+### I lost the key or moved to another TV
+
+The key is stored locally on each TV. Repeat the configuration steps on this
+TV and save the key again. If you moved to a different TV, repeat one of the
+installation methods first, then configure the app on the new TV.
+
+### Downloader or the file manager cannot install the APK
+
+When Android prompts for permission, allow the specific app that opened the
+APK to install unknown apps, then return to the installer. If the prompt does
+not appear, check the app's install-unknown-apps permission in Android
+settings. This permission is separate from the accessibility restriction. If
+the APK still cannot be installed, download it again from the official
+[releases page](https://github.com/xantipater/GTV2STREAM/releases).
 
 ## Uninstall
 
-Settings → Apps → GTV2STREAM → Uninstall. Then remove the accessibility
-service from Accessibility settings if it's still listed.
+On the TV, open **Settings > Apps > GTV2STREAM**, select **Uninstall**, and
+confirm. If GTV2STREAM is still listed in Accessibility Settings, disable its
+service after uninstalling.
