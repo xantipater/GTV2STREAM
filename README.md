@@ -2,6 +2,10 @@
 
 GTV2STREAM is a small, independent Android TV companion that redirects a selected Google TV launcher recommendation to Nuvio. It does not host, stream, or provide media.
 
+## Why install with ADB?
+
+Some Android/Google TV builds block accessibility services for sideloaded apps. Some also do not provide a usable restricted-settings toggle. On those affected builds, install the APK with [Windows over-network ADB](INSTALL.md#option-a-windows-over-network-adb) instead. ADB is not required on every device. If your device lets you enable the service normally, use Downloader or a USB stick as described in [INSTALL.md](INSTALL.md).
+
 ## Behavior
 
 The accessibility service accepts only these events from the Google TV `launcherx` package:
@@ -26,7 +30,7 @@ Every resolved recommendation uses a deliberately fresh Nuvio task: GTV2STREAM r
 4. Tap **Open Accessibility Settings**, select **GTV2STREAM recommendation redirect**, and enable it.
 5. Return to GTV2STREAM and confirm the visible service status says enabled and ready.
 
-On Android 13 or newer, sideloaded accessibility services may require Android's restricted-settings workaround. Follow the Android TV/device instructions for allowing the service, then reopen Accessibility Settings and enable GTV2STREAM.
+On Android 13 or newer, some builds block accessibility services for sideloaded apps and do not expose a usable restricted-settings toggle. On those devices, use the [Windows over-network ADB installation route](INSTALL.md#option-a-windows-over-network-adb), then reopen Accessibility Settings and enable GTV2STREAM.
 
 ## Install (users)
 
