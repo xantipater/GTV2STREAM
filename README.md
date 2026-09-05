@@ -28,17 +28,9 @@ Every resolved recommendation uses a deliberately fresh Nuvio task: GTV2STREAM r
 
 On Android 13 or newer, sideloaded accessibility services may require Android's restricted-settings workaround. Follow the Android TV/device instructions for allowing the service, then reopen Accessibility Settings and enable GTV2STREAM.
 
-## Build and tests
+## Install (users)
 
-Requirements: JDK 17, Android SDK platform 34, and build-tools 34.0.0. The included Gradle wrapper uses Gradle 8.13 and AGP 8.13.2.
-
-```sh
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-export ANDROID_HOME=/home/server/android-sdk
-./gradlew clean runHelperTests test lintDebug assembleDebug
-```
-
-`runHelperTests` exercises the dependency-free parser, URI, title-selection, false-positive, and normalization checks. The build performs no TMDB/network lookup. APK output is `app/build/outputs/apk/debug/app-debug.apk`.
+See [INSTALL.md](INSTALL.md) for a step-by-step install guide: sideload the APK, add your TMDB key, enable the accessibility service, and enable Nuvio's **Remember last profile**.
 
 ## Test the Nuvio URI directly
 
