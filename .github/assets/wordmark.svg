@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="220" viewBox="0 0 1024 220">
+  <!-- GTV2STREAM wordmark: GTV in Google's primary colours, 2 neutral, STREAM in Nuvio-style neon purple -->
+  <text x="512" y="158" text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif" font-weight="700"
+        font-size="128" letter-spacing="3"><tspan fill="#4285F4">G</tspan><tspan fill="#EA4335">T</tspan><tspan fill="#FBBC05">V</tspan><tspan fill="#9AA0A6">2</tspan><tspan fill="#C77DFF">STREAM</tspan></text>
+</svg>
