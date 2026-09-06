@@ -7,6 +7,7 @@ GTV2STREAM is a small, independent Android TV companion that redirects a selecte
 ## Install
 
 - **[Install via ADB on Windows](INSTALL_ADB.md)**
+- **[Roadmap: supported, in progress, planned](ROADMAP.md)**
 
 ADB installation is required. It installs the APK and applies the accessibility
 service setup needed on TVs that restrict sideloaded accessibility apps.
