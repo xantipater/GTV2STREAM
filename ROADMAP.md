@@ -1,6 +1,12 @@
 # Roadmap
 
-This file tracks what GTV2STREAM currently supports, what is being worked on,
+GTV2STREAM is a free, open-source Android TV companion for Google TV. It runs quietly in the background and listens to the launcher: when you click a recommendation card, it redirects that title into the app you have chosen.
+
+- **Movie and TV recommendations** are matched against TMDB and opened at exactly that title in Nuvio or Stremio.
+- **YouTube recommendation cards** open as a title search in SmartTube.
+- It does not host, stream, or provide media itself. No accounts, no servers, no analytics — nothing about your viewing ever leaves your device.
+
+This file tracks what is currently supported, what is being worked on,
 and what is planned. It exists so you can see the state of the project before
 suggesting a feature — no GitHub account needed. It is updated with each
 release.
@@ -38,6 +44,10 @@ pull the exact video automatically the way the native YouTube app does.
   "Display over other apps" permission, redirects work fine without it).
 - Bring your own TMDB key. The key and all settings stay on your device.
 - Tiny APK (~29 KB), R8-shrunk.
+- **Update awareness:** the app detects when a newer release is available on
+  GitHub and tells you in Settings, so an ADB-installed app never goes stale
+  silently. Updates are still one manual step by design — nothing installs
+  itself, keeping with the local-first rule.
 
 Full behavior details: [README](README.md). Version history:
 [CHANGELOG](CHANGELOG.md).
