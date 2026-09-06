@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#10131A"
+        android:pathData="M0,0h108v108h-108z" />
+
+    <!-- The wordmark lockup: coloured GTV above neutral 2 + purple STREAM. -->
+    <path
+        android:fillColor="#4285F4"
+        android:pathData="M35,24C31,19 27,17 21,17C11,17 6,24 6,38C6,52 12,58 22,58C28,58 33,56 37,52V36H22V43H29V49C27,51 25,51 22,51C17,51 14,47 14,38C14,29 17,25 22,25C26,25 28,27 30,31Z" />
+    <path
+        android:fillColor="#EA4335"
+        android:pathData="M39,18h28v8h-10v32h-9v-32h-9z" />
+    <path
+        android:fillColor="#FBBC05"
+        android:pathData="M67,18h10l8,29l8,-29h10l-13,40h-11z" />
+
+    <path
+        android:fillColor="#9AA0A6"
+        android:pathData="M7,70C10,65 13,63 18,63C25,63 28,67 28,73C28,78 24,82 17,88H28V95H7V89C17,81 21,77 21,73C21,71 20,70 18,70C15,70 14,72 13,75Z" />
+    <path
+        android:fillColor="#C77DFF"
+        android:fillType="evenOdd"
+        android:pathData="M26,64h11v5h-7v3h7v11h-11v-5h7v-3h-7zM39,64h12v5h-3v14h-6v-14h-3zM53,64h9c4,0 6,2 6,6c0,3 -1,4 -3,5l4,8h-7l-3,-6v6h-6zM59,69v4h3v-4zM70,64h11v5h-6v2h5v5h-5v2h6v5h-11zM79,83l5,-19h6l5,19h-6l-1,-4h-4l-1,4zM85,74h2l-1,-5zM96,64h4l2,7l2,-7h4v19h-4v-9l-1,6h-2l-1,-6v9h-4z" />
+</vector>

@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- No packageNames restriction: on some TV builds the YouTube recommendation
+     cards emit click events under a different package than the launcher
+     (com.google.android.apps.tv.launcherx). The service filters in code. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeViewClicked|typeWindowStateChanged"
+    android:accessibilityEventTypes="typeViewClicked|typeWindowStateChanged|typeViewFocused|typeViewSelected"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
     android:description="@string/service_description"
-    android:notificationTimeout="100"
-    android:packageNames="com.google.android.apps.tv.launcherx" />
+    android:notificationTimeout="100" />

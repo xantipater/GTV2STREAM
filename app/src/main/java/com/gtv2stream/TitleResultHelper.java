@@ -1,5 +1,7 @@
 package com.gtv2stream;
 
+import java.net.URLEncoder;
+import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -96,5 +98,25 @@ public final class TitleResultHelper {
         else if ("tv".equals(match.mediaType)) return "nuvio://detail/tv/" + match.imdbId;
         else return null;
         return "nuvio://" + kind + "/" + match.imdbId;
+    }
+
+    /** Stremio's documented IMDb-backed detail deep link (three slashes are required). */
+    public static String stremioUri(TitleMatch match) {
+        if (match == null || match.imdbId == null || !match.imdbId.matches("tt\\d+")) return null;
+        if ("movie".equals(match.mediaType)) return "stremio:///detail/movie/" + match.imdbId;
+        if ("tv".equals(match.mediaType)) return "stremio:///detail/series/" + match.imdbId;
+        return null;
+    }
+
+    /** YouTube title search; the same deep-link shape YouTube voice search delivers cold. */
+    public static String youtubeSearchUri(String title) {
+        String query = cleanTitle(title);
+        if (query.isEmpty()) return null;
+        try {
+            return "https://www.youtube.com/results?search_query=" + URLEncoder.encode(query, "UTF-8");
+        } catch (UnsupportedEncodingException error) {
+            // UTF-8 is always supported; unreachable in practice.
+            return null;
+        }
     }
 }

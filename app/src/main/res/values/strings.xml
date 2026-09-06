@@ -1,24 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GTV2STREAM</string>
-    <string name="app_subtitle">Google TV recommendations to Nuvio</string>
+    <string name="app_subtitle">Google TV recommendations to your apps</string>
     <string name="service_label">GTV2STREAM recommendation redirect</string>
-    <string name="service_description">Reads selected Google TV launcher recommendations and opens matching titles in Nuvio.</string>
+    <string name="service_description">Reads selected Google TV launcher recommendations and opens matching titles in the selected Nuvio or Stremio app, and YouTube cards as a title search in SmartTube.</string>
     <string name="tmdb_key_label">TMDB API key</string>
     <string name="tmdb_key_hint">Paste your own TMDB v3 API key</string>
     <string name="save_key">Save TMDB key</string>
     <string name="open_accessibility">Open Accessibility Settings</string>
-    <string name="test_nuvio">Test Nuvio movie link</string>
+    <string name="enable_overlay">Allow display over other apps (redirect badge)</string>
+    <string name="open_setup_help">Setup help (ADB install)</string>
+    <string name="target_movies_label">TV &amp; movies target: %1$s</string>
+    <string name="target_nuvio">Nuvio</string>
+    <string name="target_stremio">Stremio</string>
+    <string name="test_movie">Test TV &amp; movie link</string>
+    <string name="test_youtube">Test YouTube search</string>
+    <string name="test_link_opened">Opening test link</string>
+    <string name="test_youtube_opened">Opening YouTube test search</string>
     <string name="service_status_title">Accessibility service</string>
     <string name="status_line">%1$s: %2$s — %3$s</string>
     <string name="status_enabled">Enabled</string>
     <string name="status_disabled">Not enabled</string>
     <string name="status_key_missing">TMDB key is not configured</string>
     <string name="status_ready">Ready</string>
+    <string name="status_service_not_connected">Enabled, but the TV has not connected the service — allow auto-start for GTV2STREAM in the TV\'s app info, or restart the TV</string>
+    <string name="status_service_blocked">Blocked by the TV\'s auto-start protection; allow GTV2STREAM to auto-start</string>
+    <string name="open_app_info">Open app info (allow auto-start)</string>
+    <string name="badge_toggle_label">Show redirect badge: %1$s</string>
+    <string name="badge_on">On</string>
+    <string name="badge_off">Off</string>
     <string name="status_nuvio_missing">No Nuvio handler was found for the test link</string>
+    <string name="status_stremio_missing">Stremio was not found; install it or pick Nuvio as the target</string>
+    <string name="status_smarttube_missing">SmartTube was not found; install SmartTube to use YouTube redirects</string>
     <string name="key_saved">TMDB key saved locally</string>
-    <string name="test_link_opened">Opening Nuvio test link</string>
     <string name="invalid_key">Enter a valid-looking TMDB key (at least 10 characters)</string>
     <string name="key_rejected">TMDB rejected this key; update it in GTV2STREAM</string>
     <string name="missing_match_id">The TMDB result has no IMDb identifier</string>
+    <string name="settings_note">Matched titles open in the selected TV &amp; movies app (Nuvio or Stremio), and YouTube cards open as a title search in SmartTube. A small badge briefly confirms each redirect when this app is allowed to display over other apps. Your TMDB key is stored in this app\'s private local preferences and is sent only to TMDB for title lookup.</string>
+
+    <string name="help_title">Setup help (ADB install)</string>
+    <string name="help_intro">Use this when your TV blocks enabling the accessibility service after a normal APK installation. Your Windows PC and TV must be on the same local network, and Nuvio (or your selected target app) must already be installed on the TV. The full guide is INSTALL_ADB.md in the project repository.</string>
+    <string name="help_need">1. Download Android SDK Platform-Tools for Windows on your PC, extract the ZIP, and put the GTV2STREAM APK beside adb.exe. Get your own free TMDB v3 API key from themoviedb.org/settings/api.</string>
+    <string name="help_dev">2. On the TV: Settings > System > About, select Android TV OS build seven times, then in Developer options turn on USB debugging plus Network debugging or Wireless debugging. Note the TV\'s IP address.</string>
+    <string name="help_connect">3. In a Command Prompt opened inside the platform-tools folder, connect to the TV:</string>
+    <string name="help_connect_pair">If the TV needs pairing, open Developer options > Wireless debugging > Pair device with pairing code, keep that screen visible, then run:</string>
+    <string name="help_connect_pair_2">Enter the pairing code shown on the TV, then connect using the separate connection port shown on the main Wireless debugging screen:</string>
+    <string name="help_install">4. Install the APK (Success confirms it worked):</string>
+    <string name="help_autostart">TCL TVs may block the service from starting even after it shows Enabled (vendor auto-start protection). Open Android Settings > Apps > GTV2STREAM and allow Auto-start, or run this from the same Command Prompt:</string>
+    <string name="help_configure">5. Configure GTV2STREAM: enter your TMDB v3 key and select Save TMDB key. Pick your TV &amp; movies target (Nuvio or Stremio). YouTube redirects use SmartTube. Open Accessibility Settings, enable GTV2STREAM recommendation redirect, and confirm the status shows Enabled — Ready. If the status says the TV is blocking the service, follow the auto-start step above. If you use multiple Nuvio profiles, enable Remember last profile in Nuvio.</string>
+    <string name="help_trouble">Troubleshooting: "adb" is not recognized — run cmd from inside the platform-tools folder so adb.exe is present. Connection refused on port 5555 — use the wireless debugging pairing route instead. Pairing succeeded but connect failed — pairing and connection use different ports. Accessibility service still unavailable — ADB helps but is not guaranteed on every TV build. Install failed — confirm the APK name beside adb.exe and keep the TV connected.</string>
+    <string name="help_finish">6. After setup you can turn the debugging options back off; GTV2STREAM needs no PC or ADB connection for daily use.</string>
 </resources>

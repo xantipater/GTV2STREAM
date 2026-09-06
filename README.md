@@ -2,17 +2,14 @@
 
 ![GTV2STREAM](.github/assets/banner.svg)
 
-GTV2STREAM is a small, independent Android TV companion that redirects a selected Google TV launcher recommendation to your chosen app. Film and series titles open in Nuvio or Stremio; YouTube cards open as a title search in TizenTube Cobalt or SmartTube. It does not host, stream, or provide media.
+GTV2STREAM is a small, independent Android TV companion that redirects a selected Google TV launcher recommendation to your chosen app. Film and series titles open in Nuvio or Stremio; YouTube cards open as a title search in SmartTube. It does not host, stream, or provide media.
 
 ## Install
 
-- **[Install normally (Downloader or USB)](INSTALL.md)**
-- **[Install via ADB (Windows)](INSTALL_ADB.md)**
+- **[Install via ADB on Windows](INSTALL_ADB.md)**
 
-Some Android/Google TV builds restrict accessibility services for sideloaded
-apps, so the ADB route may be needed when the required accessibility restricted
-setting cannot be enabled normally. If normal installation works, use the
-Downloader or USB guide.
+ADB installation is required. It installs the APK and applies the accessibility
+service setup needed on TVs that restrict sideloaded accessibility apps.
 
 ## Behavior
 
@@ -21,7 +18,7 @@ The accessibility service accepts only these events from the Google TV `launcher
 - `TYPE_VIEW_CLICKED`: reads a credible title directly from the event text/content description.
 - `TYPE_WINDOW_STATE_CHANGED`: when the entity activity appears, reads the stable `entity_details_title_row` view ID.
 
-If the title row is not ready, the service retries against a fresh accessibility tree after 600 ms. It fails closed for UI chrome, metadata-only cards, advertisements, and sponsored cards. Titles are deduplicated within a short event window; no accessibility node is retained across events.
+If the title row is not ready, the service retries against a fresh accessibility tree after 250 ms, with a final attempt at 600 ms. It fails closed for UI chrome, metadata-only cards, advertisements, and sponsored cards. Titles are deduplicated within a short event window; no accessibility node is retained across events. The launcher's full UI vocabulary is excluded — navigation tabs, row labels, the quick-settings sheet, device-preferences tree, edit-mode verbs, toggle labels, input/port labels, and price actions — so a UI element whose label coincides with a real film title is never opened; fail-closed wins over the rare title miss.
 
 Provider payload handling is shape-based and provider-agnostic: action suffixes ("Watch on", "Watch Now on", "Stream on", "Streaming on", "New on", "Included with") are stripped, and a known provider name in a leading or trailing segment position is recognized across period, comma, bullet, and dash separators (e.g. "Title. Watch on Paramount+.", "Netflix. Title.", "Title, Disney+", "Title — Prime Video"). Provider names never leak into a returned title.
 
@@ -32,40 +29,41 @@ Provider payload handling is shape-based and provider-agnostic: action suffixes 
 - Nuvio — Movie: `nuvio://movie/<imdb-id>` · Series: `nuvio://detail/tv/<imdb-id>`
 - Stremio — Movie: `stremio:///detail/movie/<imdb-id>` · Series: `stremio:///detail/series/<imdb-id>`
 
-**YouTube target** (TizenTube Cobalt by default, or SmartTube): a launcher payload whose action suffix is "Watch on YouTube" (including "Stream on YouTube" and provider-first `YouTube` items) is classified as YouTube content. It skips the TMDB lookup entirely — no key is needed — and opens `https://www.youtube.com/results?search_query=<cleaned title>` in the selected app. Cobalt is launched through its fixed `dev.cobalt.app.MainActivity` component; SmartTube is tried on its stable package and then its beta package. Sponsored and advertisement payloads are still rejected outright.
+**YouTube target** (SmartTube): a launcher payload whose action suffix is "Watch on YouTube" (including "Stream on YouTube" and provider-first `YouTube` items) is classified as YouTube content. It skips the TMDB lookup entirely — no key is needed — and opens `https://www.youtube.com/results?search_query=<cleaned title>` in SmartTube. The stable package is tried first, followed by the beta and legacy packages. Sponsored and advertisement payloads are still rejected outright.
 
 ### Fresh-task launches
 
-Every resolved recommendation uses a deliberately fresh task: GTV2STREAM resolves the actual handler activity, requests Android's background-process stop for that target package, waits about 200 ms off the service worker thread, and launches the explicit component with `ACTION_VIEW`, `NEW_TASK`, and `CLEAR_TASK`. If that resolved component rejects the launch, it retries the same URI scoped to the target package (fully generically for the Nuvio scheme, whose `nuvio://` URIs can only resolve Nuvio handlers). This is intentionally destructive to the target app's task state.
+Every resolved recommendation launches the explicit target component with `ACTION_VIEW`, `NEW_TASK`, and `CLEAR_TASK`. Nuvio, Stremio, and SmartTube accept this reliably while their process remains warm, which avoids an unnecessary cold start. If a resolved component rejects the launch, GTV2STREAM retries the same URI scoped to the target package (fully generically for the Nuvio scheme, whose `nuvio://` URIs can only resolve Nuvio handlers).
 
-To keep redirects snappy, recent TMDB matches are kept in a small in-memory cache keyed by normalized title. Re-selecting the same card within five minutes launches from the cached match without any network call (useful when retrying a failed launch or returning after closing the target app). The cache is memory-only: nothing is stored on disk, and it resets when the service restarts.
-
-For Cobalt this matters more than for scheme-owned URIs: `CLEAR_TASK` alone leaves a cached process alive, and Cobalt's warm-start deep-link delivery depends on YouTube's closed web app. Killing the process forces a true cold start, so the web app consumes the link through the designed-for-voice-search `h5vcc.runtime.getInitialDeepLink` contract — the same path certified YouTube TV voice search uses. Users with multiple Nuvio profiles may want Nuvio's **Remember last profile** option enabled, because a genuinely fresh task can show profile selection by design. The Settings test buttons follow the same fresh-launch behavior.
+To keep redirects snappy, recent TMDB matches are kept in a 32-entry in-memory cache keyed by normalized title. Re-selecting the same card within 24 hours launches from the cached match without any network call. The cache is memory-only: nothing is stored on disk, and it resets when the service restarts.
 
 If the selected target app is not installed, GTV2STREAM shows a message instead of launching blindly.
 
 ### Redirect badge
 
-After every successful redirect, a small GTV2STREAM logo badge appears briefly at the top right of the screen. It is an application overlay window, so it requires the **Display over other apps** permission (one tap from the Settings screen); without that permission redirects work normally and the badge simply does not appear. The badge is non-focusable and non-touchable and never steals input from the launched app.
+After every successful redirect, a small GTV2STREAM logo badge appears briefly at the top right of the screen. It is an application overlay window, so it requires the **Display over other apps** permission (one tap from the Settings screen); without that permission redirects work normally and the badge simply does not appear. The badge is non-focusable and non-touchable and never steals input from the launched app, and it is shown ~300 ms after the launch so it only ever draws over the freshly opened target app — never over the launcher. A Settings toggle (**Show redirect badge**) turns it off entirely.
+
+### TV auto-start protection (TCL and similar)
+
+TCL TV builds ship a vendor auto-start firewall that can refuse to connect the accessibility service even when it is enabled — the app's status detects this and reports "Blocked by the TV's auto-start protection" with a one-tap fix (allow auto-start in the TV's app info). On the ADB route the equivalent command is `appops set com.gtv2stream AUTO_START allow`.
 
 ## Setup on Google TV / Android TV
 
-For the released APK, start with either the [normal installation guide](INSTALL.md)
-or the [Windows ADB installation guide](INSTALL_ADB.md). The guides include the
-APK installation, TMDB key, target selection, accessibility service, usage,
-test, and troubleshooting steps.
+For the released APK, follow the [Windows ADB installation guide](INSTALL_ADB.md).
+It includes APK installation, TMDB key setup, target selection, accessibility
+service setup, usage, testing, and troubleshooting.
 
 The basic setup is:
 
-1. Install the released APK using one of the two guides above. End users do
-   not need to build from source.
+1. Install the released APK using the ADB guide above. End users do not need
+   to build from source.
 2. Create your own TMDB v3 API key at
    <https://www.themoviedb.org/settings/api>.
 3. Open GTV2STREAM, enter the key, and select **Save TMDB key**. The key is
    stored only in the app's private local preferences and is never committed
    to source.
-4. Pick your targets with the two selector buttons: **TV & movies target**
-   (Nuvio or Stremio) and **YouTube target** (TizenTube Cobalt or SmartTube).
+4. Pick your **TV & movies target** (Nuvio or Stremio). YouTube redirects use
+   SmartTube.
 5. Select **Open Accessibility Settings**, choose **GTV2STREAM recommendation
    redirect**, and enable it.
 6. Return to GTV2STREAM and confirm that the visible service status says
@@ -81,8 +79,8 @@ for the optional build workflow.
 
 The in-app test buttons follow the same fresh-launch behavior as real
 redirects. The movie probe uses the known identifier `tt0371746` (Nuvio or
-Stremio, per the selected target); the YouTube probe searches for "Big Buck
-Bunny" (Cobalt or SmartTube, per the selected target). Direct URI smoke
+Stremio, per the selected target); the YouTube probe searches SmartTube for
+"Big Buck Bunny". Direct URI smoke
 tests, when run on an Android TV test device with a target installed, are:
 
 ```sh

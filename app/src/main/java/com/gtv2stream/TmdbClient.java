@@ -17,6 +17,8 @@ import java.util.List;
 /** Minimal TMDB v3 client. It is called only from the service worker thread. */
 public final class TmdbClient {
     private static final String API = "https://api.themoviedb.org/3";
+    private static final int CONNECT_TIMEOUT_MS = 5000;
+    private static final int READ_TIMEOUT_MS = 10000;
     private final String apiKey;
 
     public TmdbClient(String apiKey) {
@@ -84,18 +86,26 @@ public final class TmdbClient {
     private String get(String address) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
         connection.setRequestMethod("GET");
-        connection.setConnectTimeout(10000);
-        connection.setReadTimeout(10000);
+        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        connection.setReadTimeout(READ_TIMEOUT_MS);
         connection.setRequestProperty("Accept", "application/json");
         try {
             int status = connection.getResponseCode();
             if (status == HttpURLConnection.HTTP_UNAUTHORIZED || status == HttpURLConnection.HTTP_FORBIDDEN) {
+                connection.disconnect();
                 throw new InvalidApiKeyException();
             }
-            if (status < 200 || status >= 300) throw new IOException("TMDB HTTP " + status);
+            if (status < 200 || status >= 300) {
+                connection.disconnect();
+                throw new IOException("TMDB HTTP " + status);
+            }
+            // No disconnect on success: reading the body fully returns the socket
+            // to the platform keep-alive pool, so the follow-up external_ids call
+            // and later lookups reuse the connection instead of re-handshaking.
             return readAll(connection.getInputStream());
-        } finally {
+        } catch (IOException error) {
             connection.disconnect();
+            throw error;
         }
     }
 

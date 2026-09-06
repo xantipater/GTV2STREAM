@@ -1,19 +1,19 @@
 # GTV2STREAM: Install via ADB on Windows
 
-This is a complete Windows guide for installing the released GTV2STREAM APK
-with Android Debug Bridge (ADB) over your local network. Use it when a TV
-build blocks the accessibility service after a normal APK installation. If
-your TV lets you enable the service normally, use the [normal installation
-guide](INSTALL.md) instead.
+This is the supported installation method for GTV2STREAM. It installs the
+released APK with Android Debug Bridge (ADB) over your local network and
+configures the accessibility service required for recommendation redirects.
 
 This guide does not use a USB cable. Your Windows PC and TV must be connected
-to the same local network, and Nuvio must already be installed on the TV.
+to the same local network, and the target app you plan to use (Nuvio, Stremio,
+or SmartTube) must already be installed on the TV.
 
 ## What you need
 
 - A Windows PC on the same local network as the Google TV or Android TV.
 - A Google TV or Android TV with the Google TV home launcher.
-- Nuvio installed on the TV.
+- The target app you plan to use (Nuvio or Stremio, plus SmartTube for YouTube
+  cards) already installed on the TV.
 - Internet access for downloading Platform-Tools and the APK.
 - The released APK:
   [GTV2STREAM-v1.0.0.apk](https://github.com/xantipater/GTV2STREAM/releases/download/v1.0.0/GTV2STREAM-v1.0.0.apk)
@@ -121,6 +121,17 @@ adb install -r GTV2STREAM-v1.0.0.apk
 Wait for the command to finish. `Success` confirms that the APK was installed.
 If the command reports an error, see [Troubleshooting](#troubleshooting).
 
+TCL TVs additionally block accessibility services from *starting* through a
+vendor auto-start firewall, even after they show as enabled. Grant the vendor
+auto-start permission from the same Command Prompt:
+
+```text
+appops set com.gtv2stream AUTO_START allow
+```
+
+You can also allow it on the TV under **Android Settings > Apps > GTV2STREAM
+> Auto-start**, when that toggle exists.
+
 ## 5. Configure GTV2STREAM
 
 1. Open **GTV2STREAM** from the TV app list.
@@ -129,33 +140,48 @@ If the command reports an error, see [Troubleshooting](#troubleshooting).
 3. Select **Save TMDB key**. The key is stored privately in the app's local
    storage on this TV. It is not shared with this project or committed to
    source.
-4. Select **Open Accessibility Settings**.
-5. Select **GTV2STREAM recommendation redirect** and enable it.
-6. Return to GTV2STREAM and confirm that the service status says it is enabled
+4. Pick your targets:
+   - **TV & movies target: Nuvio** (default) or **Stremio**.
+   - YouTube recommendations open as a title search in **SmartTube**.
+5. Select **Open Accessibility Settings**.
+6. Select **GTV2STREAM recommendation redirect** and enable it.
+7. Return to GTV2STREAM and confirm that the service status says it is enabled
    and ready.
-7. If you use more than one Nuvio profile, open Nuvio and enable **Remember
-   last profile**. GTV2STREAM deliberately starts Nuvio in a fresh task, so
-   this setting prevents the profile picker from appearing on every launch.
+8. If you use more than one Nuvio profile and Nuvio is your target, open Nuvio
+   and enable **Remember last profile**. GTV2STREAM deliberately starts the
+   target app in a fresh task, so this setting prevents the profile picker
+   from appearing on every launch.
+9. Optional: select **Allow display over other apps (redirect badge)** so a
+   small GTV2STREAM badge briefly confirms each redirect.
+
+These steps are also shown on the TV itself: select **Setup help (ADB
+install)** in GTV2STREAM's settings.
 
 ## 6. Use and test GTV2STREAM
 
 1. Return to the Google TV home screen.
 2. Focus a movie recommendation card and select it. A matched movie should
-   open in Nuvio.
+   open in your selected TV & movies target (Nuvio by default).
 3. Repeat with a series recommendation card. A matched series should open in
-   Nuvio.
-4. You can also use the test button in GTV2STREAM's settings. It tests a
-   known movie and follows the same fresh Nuvio launch behavior.
-5. The links GTV2STREAM sends to Nuvio have these forms:
+   the same target app.
+4. YouTube recommendation cards behave differently: they skip the TMDB lookup
+   and open a YouTube title search in SmartTube.
+5. You can also use the two test buttons in GTV2STREAM's settings. They test
+   the currently selected targets and follow the same fresh-task launch
+   behavior as real redirects.
+6. The links GTV2STREAM sends to Nuvio have these forms:
 
    - Movie: `nuvio://movie/<imdb-id>`
    - Series: `nuvio://detail/tv/<imdb-id>`
 
    For example, a movie link is `nuvio://movie/tt0371746`, and a series link
-   is `nuvio://detail/tv/tt0944947`.
+   is `nuvio://detail/tv/tt0944947`. Stremio uses
+   `stremio:///detail/movie/<imdb-id>` and
+   `stremio:///detail/series/<imdb-id>`.
 
-GTV2STREAM ignores advertisements, sponsored cards, and YouTube items. Test
-with a real movie or series card on the Google TV home screen rather than an
+GTV2STREAM ignores advertisements and sponsored cards. YouTube cards are not
+ignored; they open a title search in SmartTube. Test with
+a real movie or series card on the Google TV home screen rather than an
 advertisement or a card inside YouTube.
 
 ## 7. Turn off debugging after setup
@@ -219,6 +245,12 @@ usable ADB path or still applies a platform restriction, consult the TV
 manufacturer's documentation or use a device that supports the required
 accessibility service.
 
+### The target app is not installed
+
+Each target must be installed on the TV. If the selected target is missing,
+GTV2STREAM shows a message instead of launching blindly. Pick another target
+in the settings or install the selected app first.
+
 ### TMDB key is rejected
 
 Confirm that you entered your own TMDB **v3 API key**, which is the API key
@@ -234,7 +266,8 @@ multiple profiles and GTV2STREAM starts a fresh task.
 
 Open GTV2STREAM and check that its status says the accessibility service is
 enabled and ready. Test a normal movie or series card on the Google TV home
-screen. Ads, sponsored cards, and YouTube items are intentionally ignored.
+screen. Ads and sponsored cards are intentionally ignored; YouTube cards open
+a title search in SmartTube.
 
 ## Uninstall
 

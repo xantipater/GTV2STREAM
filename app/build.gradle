@@ -2,18 +2,6 @@ plugins {
     id 'com.android.application'
 }
 
-// Read the temporary credential from local.properties (or a Gradle project property)
-// so it never has to appear in tracked source files.
-def localProperties = new Properties()
-def localPropertiesFile = rootProject.file('local.properties')
-if (localPropertiesFile.exists()) {
-    localPropertiesFile.withInputStream { localProperties.load(it) }
-}
-def tmdbApiKey = (project.findProperty('tmdbApiKey') ?: localProperties.getProperty('tmdbApiKey', '')).toString().trim()
-def escapeBuildConfigString = { String value ->
-    '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r') + '"'
-}
-
 android {
     namespace 'com.gtv2stream'
     compileSdk 34
@@ -22,15 +10,15 @@ android {
         applicationId 'com.gtv2stream'
         minSdk 26
         targetSdk 34
-        versionCode 1
+        versionCode 3
         versionName '1.0.0'
         testInstrumentationRunner 'android.test.runner.AndroidJUnitRunner'
-        buildConfigField 'String', 'TMDB_API_KEY', escapeBuildConfigString(tmdbApiKey)
     }
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -38,10 +26,6 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-    }
-
-    buildFeatures {
-        buildConfig true
     }
 }
 
