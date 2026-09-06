@@ -118,6 +118,15 @@ connection path has succeeded:
 adb install -r GTV2STREAM-v1.1.0.apk
 ```
 
+**Upgrading from v1.0.0?** The v1.1.0 APK uses a new signing key, so the
+install above will fail with a signature error. Uninstall the old version
+once (your saved TMDB key is removed with it), then install:
+
+```text
+adb uninstall com.gtv2stream
+adb install GTV2STREAM-v1.1.0.apk
+```
+
 Wait for the command to finish. `Success` confirms that the APK was installed.
 If the command reports an error, see [Troubleshooting](#troubleshooting).
 
