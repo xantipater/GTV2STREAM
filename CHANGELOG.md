@@ -4,7 +4,7 @@ All notable changes to GTV2STREAM are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-09-06
 
 ### Added
 - Selectable **TV & movies** targets (Nuvio or Stremio), plus SmartTube

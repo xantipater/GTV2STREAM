@@ -16,7 +16,7 @@ or SmartTube) must already be installed on the TV.
   cards) already installed on the TV.
 - Internet access for downloading Platform-Tools and the APK.
 - The released APK:
-  [GTV2STREAM-v1.0.0.apk](https://github.com/xantipater/GTV2STREAM/releases/download/v1.0.0/GTV2STREAM-v1.0.0.apk)
+  [GTV2STREAM-v1.1.0.apk](https://github.com/xantipater/GTV2STREAM/releases/download/v1.1.0/GTV2STREAM-v1.1.0.apk)
 - Your own free TMDB v3 API key from
   <https://www.themoviedb.org/settings/api>.
 
@@ -27,15 +27,15 @@ or SmartTube) must already be installed on the TV.
    ZIP file.
 2. Extract the ZIP file. This creates a `platform-tools` folder containing
    `adb.exe`.
-3. Download `GTV2STREAM-v1.0.0.apk` from the
+3. Download `GTV2STREAM-v1.1.0.apk` from the
    [GTV2STREAM releases page](https://github.com/xantipater/GTV2STREAM/releases)
    or from this direct URL:
 
    ```text
-   https://github.com/xantipater/GTV2STREAM/releases/download/v1.0.0/GTV2STREAM-v1.0.0.apk
+   https://github.com/xantipater/GTV2STREAM/releases/download/v1.1.0/GTV2STREAM-v1.1.0.apk
    ```
 
-4. Put `GTV2STREAM-v1.0.0.apk` beside `adb.exe` in the extracted
+4. Put `GTV2STREAM-v1.1.0.apk` beside `adb.exe` in the extracted
    `platform-tools` folder.
 
 ## 2. Prepare the TV for network ADB
@@ -115,7 +115,7 @@ Run this command in the same `platform-tools` Command Prompt after either
 connection path has succeeded:
 
 ```text
-adb install -r GTV2STREAM-v1.0.0.apk
+adb install -r GTV2STREAM-v1.1.0.apk
 ```
 
 Wait for the command to finish. `Success` confirms that the APK was installed.
@@ -228,7 +228,7 @@ Android TV build exposes the same debugging controls.
 
 ### `adb install` fails
 
-Confirm that the APK is named `GTV2STREAM-v1.0.0.apk` and is beside `adb.exe`.
+Confirm that the APK is named `GTV2STREAM-v1.1.0.apk` and is beside `adb.exe`.
 Download it again from the official
 [releases page](https://github.com/xantipater/GTV2STREAM/releases) if the file
 is incomplete. Keep the TV connected while the install runs. The `-r` option
