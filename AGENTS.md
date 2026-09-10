@@ -60,7 +60,7 @@ Important files:
 - `app/src/main/java/com/gtv2stream/StremioLauncher.java` — Stremio launch path.
 - `app/src/main/java/com/gtv2stream/YouTubeLauncher.java` — SmartTube launch path.
 - `app/src/test/java/com/gtv2stream/DeepLinkHelperTest.java` — current dependency-free JVM regression test harness.
-- `.github/workflows/ci.yml` — v1.2 CI workflow on `release/1.2`.
+- `.github/workflows/ci.yml` — v1.2 CI workflow.
 
 Before editing parser/routing behaviour, read at minimum:
 
@@ -226,7 +226,11 @@ Daredevil — Disney+
 Daredevil, Disney+
 ```
 
-Also cross-check equivalent forms for at least Netflix, Prime Video and ITVX.
+Also cross-check equivalent forms for at least:
+
+- Netflix;
+- Prime Video;
+- ITVX.
 
 Do not assume every English phrase containing a provider name is a valid action.
 
@@ -249,7 +253,9 @@ Do not assume every English phrase containing a provider name is a valid action.
 
 Target: `release/1.2`
 
-Suggested title: `fix: harden provider action parsing`
+Suggested title:
+
+`fix: harden provider action parsing`
 
 Reference issue `#2` in the PR body.
 
@@ -279,6 +285,8 @@ You may inspect surrounding code and prepare tests/review notes, but do not inve
 
 A whitelisted provider must bypass GTV2STREAM so Google TV handles the recommendation normally.
 
+Example:
+
 ```text
 Prime recommendation
 + Prime Video whitelisted
@@ -287,6 +295,8 @@ Prime recommendation
 ```
 
 A non-whitelisted provider continues through the configured redirect target.
+
+Example:
 
 ```text
 Netflix recommendation
@@ -320,7 +330,9 @@ Verify:
 
 Target: `release/1.2`
 
-Suggested title: `feat: add provider whitelist`
+Suggested title:
+
+`feat: add provider whitelist`
 
 Reference issue `#1` in the PR body.
 
@@ -338,6 +350,8 @@ Create it from the latest `release/1.2` if it does not already exist.
 
 Make CI a useful release gate, not a complicated release system.
 
+## Existing required checks
+
 CI should run at least:
 
 ```bash
@@ -345,6 +359,8 @@ CI should run at least:
 ./gradlew :app:lintDebug --stacktrace
 ./gradlew :app:assembleDebug --stacktrace
 ```
+
+## Tasks
 
 Review/improve `.github/workflows/ci.yml` so that:
 
@@ -371,17 +387,41 @@ Do not create GitHub releases automatically in v1.2 unless the owner explicitly 
 
 Target: `release/1.2`
 
-Suggested title: `ci: harden Android build and test workflow`
+Suggested title:
+
+`ci: harden Android build and test workflow`
 
 ---
 
 # WORKSTREAM E — Independent reviewer
 
+## Rule
+
 The reviewer should not be the agent that authored the changes under review.
+
+## Inputs
 
 Review all open PRs targeting `release/1.2` plus the resulting combined release branch.
 
-Look specifically for parser false positives/negatives, duplicated provider logic, regex overreach, broken whitelist defaults, title/provider confusion, secret leakage, telemetry/privacy regressions, unnecessary Android permissions, lifecycle regressions, dead code, ineffective tests and scope creep.
+## Review priorities
+
+Look specifically for:
+
+- parser false positives;
+- parser false negatives introduced by over-tightening;
+- duplicated provider recognition logic;
+- action-regex overreach;
+- broken whitelist defaults/migration;
+- title/provider confusion;
+- accidental secret or credential leakage;
+- telemetry/privacy regressions;
+- new unnecessary Android permissions;
+- race/lifecycle regressions in `TvRecommendationService`;
+- dead code;
+- tests that do not actually exercise the intended path;
+- unrelated refactors/scope creep.
+
+## Reviewer output
 
 For each problem provide:
 
@@ -406,6 +446,8 @@ Run from repository root:
 
 Record the result of each in the PR body.
 
+Use this exact format:
+
 ```text
 Validation
 - [x] :app:runHelperTests
@@ -413,7 +455,7 @@ Validation
 - [x] :app:assembleDebug
 ```
 
-If something cannot run:
+If something cannot run, use:
 
 ```text
 - [ ] :app:lintDebug — NOT RUN: <specific reason>
@@ -425,7 +467,9 @@ Never mark an unrun test as passed.
 
 ## 6. Commit rules
 
-Use small, descriptive commits such as:
+Use small, descriptive commits.
+
+Good examples:
 
 ```text
 test: add provider payload fixtures
@@ -434,7 +478,16 @@ feat: persist provider whitelist
 ci: upload debug APK artifact
 ```
 
-Avoid vague messages such as `updates`, `fix stuff`, `changes`, or `wip`.
+Avoid vague messages such as:
+
+```text
+updates
+fix stuff
+changes
+wip
+```
+
+Do not combine unrelated changes in one commit solely to reduce commit count.
 
 ---
 
@@ -487,40 +540,149 @@ After an earlier workstream merges, remaining agents should update from `release
 
 ## 9. Real-device release gate
 
-Automated tests and Android emulators are useful but are **not authoritative** for exact accessibility payloads produced by the Google TV `launcherx` package or vendor-specific behaviour.
+Automated tests and Android emulators are useful but are **not authoritative** for the exact accessibility payloads produced by the Google TV `launcherx` package or vendor-specific TV behaviour.
 
-Before v1.2 is merged to `main`, test the release candidate on real Google TV hardware against at least:
+Before v1.2 is merged to `main`, the release candidate must be tested on real Google TV hardware.
 
-- Disney+;
-- Prime Video;
-- Netflix;
-- ITVX;
-- YouTube -> SmartTube;
-- Nuvio;
-- Stremio;
+Minimum real-device matrix:
+
+- Disney+ recommendation;
+- Prime Video recommendation;
+- Netflix recommendation;
+- ITVX recommendation;
+- YouTube recommendation -> SmartTube;
+- Nuvio target;
+- Stremio target;
 - whitelisted provider;
 - non-whitelisted provider;
 - sponsored/advertisement card;
-- normal launcher navigation/settings;
+- normal launcher navigation;
+- normal settings interactions;
 - accessibility service reconnect/restart behaviour.
 
-Convert real-device failures into regression fixtures whenever possible.
+If a real-device case fails, capture the smallest useful payload/diagnostic information and convert it into a regression fixture when possible.
 
 ---
 
-## 10. Stop conditions
+## 10. What good looks like
 
-Stop and report rather than guessing if:
+Passing tests is necessary, but it is not enough. A change is good only when the implementation is small, bounded, understandable, regression-protected, and does not quietly alter unrelated behaviour.
+
+### Good implementation standard
+
+For every implementation or bug fix, aim for all of the following:
+
+- Solve the assigned problem, not a larger adjacent problem.
+- Change the smallest reasonable amount of production code.
+- Reuse existing helpers and concepts rather than creating duplicate provider/parser logic.
+- Keep behaviour explicit and bounded. Avoid broad heuristics when a narrow rule will solve the observed case.
+- Add a regression test that would fail on the previous behaviour and pass with the fix.
+- Add negative/boundary coverage where the change could create false positives.
+- Preserve all existing tests and established v1.1 behaviour unless the workstream explicitly changes it.
+- Keep code readable enough that another maintainer can understand why the rule exists without reconstructing the entire bug report.
+- Avoid speculative abstractions, premature frameworks, and unrelated cleanup.
+- Make the PR explain exactly what changed, why it is safe, what could regress, and what was actually tested.
+
+### Parser-specific quality bar
+
+For parser/routing changes, "good" means more than recognising the new input. The change must also show that nearby unsafe inputs remain rejected.
+
+A good parser fix normally includes:
+
+- at least one positive case for the reported/target payload;
+- equivalent positive cases for relevant existing providers where the rule is provider-agnostic;
+- at least one negative or boundary case showing the new rule is not free-form;
+- confirmation that sponsored/advertisement content remains rejected;
+- confirmation that launcher UI/settings text remains rejected where relevant;
+- confirmation that title punctuation/provider stripping still behaves correctly.
+
+### Example: bad vs good
+
+Bad:
+
+```text
+Problem: Disney+ "Available on" payload is missed.
+Change: accept any string containing "Disney+" or "available".
+Tests: one Disney+ happy-path test.
+Result: test passes, but parser is now broadly more permissive.
+```
+
+Good:
+
+```text
+Observed/target payload:
+Daredevil. Available on Disney+
+
+Before:
+The action suffix is not recognised, so the payload is rejected or misparsed.
+
+Change:
+Add one bounded "Available on <provider>" action family using the existing provider/title parsing path.
+
+Regression coverage:
+- Disney+ positive case
+- Netflix equivalent positive case
+- Prime Video equivalent positive case
+- ITVX equivalent positive case
+- sponsored equivalent remains rejected
+- unrelated UI text containing "available" remains rejected
+- existing punctuation/title cases still pass
+
+Result:
+The known payload shape works without turning provider recognition into free-form text matching.
+```
+
+### Tests must prove behaviour, not decorate the PR
+
+A test is useful only if it exercises the behaviour that could break.
+
+Do not add assertions that merely repeat implementation constants or cannot fail when the real bug returns. For bug fixes, prefer a test input representing the actual failing shape and assert the externally meaningful result: parsed title, source classification, acceptance/rejection, bypass/redirect decision, or generated deep link as appropriate.
+
+When practical, confirm the new regression test would fail against the pre-fix behaviour before relying on it as proof of the fix.
+
+### Mandatory pre-PR self-review gate
+
+Before opening or marking a PR ready, answer these questions yourself. If any answer is "no" or "I don't know", fix the problem or report the uncertainty before declaring the work complete.
+
+1. Did I solve the assigned problem rather than expanding scope?
+2. Is this the smallest safe implementation I can reasonably make?
+3. Is there a regression test that proves the intended new/fixed behaviour?
+4. Where permissiveness changed, is there a negative/boundary test proving it did not become too broad?
+5. Do all existing tests still pass?
+6. Did I reuse existing logic instead of duplicating provider/parser/state handling?
+7. Did I avoid unrelated refactors and cosmetic churn?
+8. Could an existing v1.1 user encounter an unintended behaviour change from this diff?
+9. Can I explain why every production-code change in this PR is necessary for the assigned task?
+10. Did I verify rather than assume the required build/test results?
+11. Does the PR clearly distinguish emulator/unit-test confidence from real Google TV validation?
+12. Would I be comfortable having another maintainer merge this based only on the diff, tests and PR explanation, without relying on "probably works"?
+
+### Do not call work complete when
+
+- only the happy path was tested;
+- tests were not run but the PR implies they passed;
+- the implementation solves the issue by broadly weakening rejection rules;
+- a large refactor is mixed with a small bug fix without necessity;
+- the new code duplicates existing provider/title logic;
+- real-device behaviour is claimed without real-device evidence;
+- the implementation depends on guessed launcher payloads that were not safely bounded;
+- comments or PR text promise behaviour that the tests/code do not demonstrate.
+
+---
+
+## 11. Stop conditions
+
+Stop and report rather than guessing if any of these occur:
 
 - the required branch is missing and you cannot create it;
-- the whitelist implementation is not present remotely;
-- a fix seems to require broadly weakening ad/sponsored/UI rejection;
-- the change would add telemetry, a backend, accounts or off-device viewing data;
-- signing credentials or secrets are required;
-- real launcher payload data is required but unavailable and safe behaviour cannot be bounded;
-- the task requires unrelated architectural work beyond v1.2.
+- the whitelist workstream has no owner's implementation to integrate;
+- fixing a bug appears to require weakening sponsored/ad/UI rejection broadly;
+- a requested change would add telemetry, a remote backend, accounts, or send viewing data off-device;
+- signing credentials or secrets would be required;
+- real Google TV payload data is required but unavailable and the behaviour cannot be bounded safely;
+- the task would require unrelated architectural changes beyond v1.2 scope.
 
-Use:
+Use this format:
 
 ```text
 BLOCKED
@@ -531,38 +693,55 @@ What is needed: <smallest missing input/action>
 
 ---
 
-## 11. Definition of done for v1.2
+## 12. Definition of done for v1.2
 
-v1.2 is ready for a release PR only when:
+v1.2 is ready for a release PR only when all of the following are true:
 
-- provider regression fixture coverage exists;
-- issue #2 is fixed or explicitly deferred with evidence;
-- issue #1 is integrated and validated;
+- provider regression fixture coverage is in place;
+- Disney/provider issue #2 is fixed or explicitly deferred with evidence;
+- whitelist issue #1 is integrated and validated;
 - helper tests pass;
 - lint passes;
 - debug build passes;
 - CI passes on the combined release branch;
 - independent review has no unresolved blockers;
-- real Google TV validation is complete;
-- `CHANGELOG.md`, `README.md` and `ROADMAP.md` match actual shipped behaviour;
-- version code/name are updated only when preparing the release candidate.
+- real Google TV validation matrix has been completed;
+- `CHANGELOG.md`, `README.md`, and `ROADMAP.md` reflect actual shipped behaviour;
+- version code/name are updated only when preparing the actual release candidate.
 
 ---
 
-## 12. Current state
+## 13. Current branch/state summary
 
-- `main` — stable v1.1.0 branch.
-- `release/1.2` — v1.2 integration branch and source of truth for current development.
-- `chore/reliability-tests` — test-harness workstream.
-- `fix/disney-provider-parsing` — issue #2 workstream.
-- `feature/whitelist` — issue #1 workstream; do not recreate missing local work.
-- `chore/ci-release` — CI workstream; create when needed.
-- `.github/workflows/ci.yml` exists on `release/1.2`.
+Stable:
+
+`main` — v1.1.0 baseline / public stable branch.
+
+Integration:
+
+`release/1.2` — all v1.2 work merges here first.
+
+Existing work branches:
+
+- `chore/reliability-tests`
+- `fix/disney-provider-parsing`
+- `feature/whitelist`
+
+Planned CI branch:
+
+- `chore/ci-release`
+
+Known issues:
+
+- `#1` provider whitelist — enhancement; owner has stated a local implementation exists and should be integrated rather than recreated.
+- `#2` Disney+ links not resolving properly — bug; likely provider/action payload parsing.
+
+CI workflow exists on `release/1.2`.
 
 ---
 
-## 13. Exact autonomous-agent instruction
+## 14. One-line instruction for an autonomous agent
 
-If you were given no other instructions, do this:
+If you were given no other instructions, follow this exactly:
 
-> Fetch the repo, checkout the latest `release/1.2`, read `AGENTS.md` completely, inspect open PRs/issues to avoid duplicate work, take the highest-priority incomplete workstream you can safely execute, use only its prescribed branch and scope, implement the smallest correct change, run every required validation command, open a PR to `release/1.2` using the required PR format, and stop with the documented `BLOCKED` report instead of guessing outside this runbook.
+> Checkout the latest `release/1.2`, read `AGENTS.md` completely, inspect existing open PRs so you do not duplicate work, take the highest-priority incomplete workstream you can safely execute, work only on its prescribed branch, meet the "What good looks like" quality bar, run all required validation, perform the mandatory self-review, and open a PR back to `release/1.2`; stop with a precise `BLOCKED` report rather than guessing outside this runbook.
