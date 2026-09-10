@@ -250,7 +250,6 @@ public final class DeepLinkHelperTest {
         check(MatchCache.get("Landman") == null, "clear evicts"); assertions++;
         check(RecommendationTitleParser.fromEventText(Collections.singletonList("Season 4 • Thriller")).isEmpty(),
                 "metadata-only event rejected"); assertions++;
-
         // Table-driven fixtures keep representative launcher payloads reproducible and auditable.
         for (GoogleTvPayloadFixtures.Fixture fixture : GoogleTvPayloadFixtures.all()) {
             RecommendationTitleParser.Source parsed = fixture.eventText != null
@@ -260,6 +259,18 @@ public final class DeepLinkHelperTest {
                     "payload fixture: " + fixture.name);
             assertions++;
         }
+
+        check(UpdateChecker.compareVersions("v1.2.0", "v1.1.0") > 0, "newer version"); assertions++;
+        check(UpdateChecker.compareVersions("1.1.0", "v1.1.0") == 0, "equal version"); assertions++;
+        check(UpdateChecker.compareVersions("v1.0.9", "1.1.0") < 0, "older version"); assertions++;
+        check(UpdateChecker.compareVersions("release", "1.1.0") == 0, "malformed version safe"); assertions++;
+        check(UpdateChecker.compareVersions("v1.2.0-rc1", "v1.1.0") == 0, "prerelease version rejected"); assertions++;
+        String stable = "{\"draft\":false,\"prerelease\":false,\"tag_name\":\"v1.2.0\",\"html_url\":\"https://github.com/xantipater/GTV2STREAM/releases/tag/v1.2.0\"}";
+        check("v1.2.0".equals(UpdateChecker.parseStableReleaseVersion(stable)), "stable release parsed"); assertions++;
+        check(UpdateChecker.parseStableReleaseVersion(stable.replace("false,\"prerelease\":false", "false,\"prerelease\":true")) == null, "prerelease ignored"); assertions++;
+        check(UpdateChecker.parseStableReleaseVersion("{\"draft\" : true, \"prerelease\" : false, \"tag_name\" : \"v1.3.0\"}") == null, "draft ignored"); assertions++;
+        check(UpdateChecker.parseStableReleaseVersion("{\"draft\" : false, \"prerelease\" : true, \"tag_name\" : \"v1.3.0\"}") == null, "whitespace prerelease ignored"); assertions++;
+        check(UpdateChecker.parseStableReleaseVersion("{\"tag_name\":\"next\"}") == null, "unexpected tag rejected"); assertions++;
         System.out.println("DeepLinkHelperTest: PASS (" + assertions + " assertions)");
     }
 

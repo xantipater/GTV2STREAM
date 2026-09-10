@@ -29,6 +29,8 @@
     <string name="badge_toggle_label">Show redirect badge: %1$s</string>
     <string name="badge_on">On</string>
     <string name="badge_off">Off</string>
+    <string name="update_available">Update available: GTV2STREAM %1$s</string>
+    <string name="open_update">Open release page</string>
     <string name="status_nuvio_missing">No Nuvio handler was found for the test link</string>
     <string name="status_stremio_missing">Stremio was not found; install it or pick Nuvio as the target</string>
     <string name="status_smarttube_missing">SmartTube was not found; install SmartTube to use YouTube redirects</string>

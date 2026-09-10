@@ -33,6 +33,8 @@ public final class SettingsActivity extends Activity {
     private Button moviesTargetButton;
     private Button badgeToggleButton;
     private Button appInfoButton;
+    private TextView updateNotice;
+    private Button updateButton;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -69,6 +71,13 @@ public final class SettingsActivity extends Activity {
         status.setPadding(dp(18), dp(14), dp(18), dp(14));
         status.setBackgroundColor(Color.rgb(28, 35, 48));
         root.addView(status, lp(-1, -2, 0, 0, 0, 22));
+
+        updateNotice = text("", 18, Color.rgb(255, 209, 102));
+        updateNotice.setVisibility(View.GONE);
+        root.addView(updateNotice, lp(-1, -2, 0, 0, 0, 7));
+        updateButton = button(getString(R.string.open_update));
+        updateButton.setVisibility(View.GONE);
+        root.addView(updateButton, lp(-1, dp(58), 0, 0, 0, 12));
 
         TextView keyLabel = text(getString(R.string.tmdb_key_label), 18, Color.WHITE);
         root.addView(keyLabel, lp(-1, -2, 0, 0, 0, 7));
@@ -155,6 +164,19 @@ public final class SettingsActivity extends Activity {
         root.addView(note, lp(-1, -2, 0, 0, 0, 0));
         setContentView(scroll);
         refreshTargetButtons();
+        UpdateChecker.check(this, (version, url) -> showUpdate(version, url));
+    }
+
+    private void showUpdate(String version, String url) {
+        if (isFinishing() || (Build.VERSION.SDK_INT >= 17 && isDestroyed())
+                || updateNotice == null || updateButton == null) return;
+        updateNotice.setText(getString(R.string.update_available, version));
+        updateNotice.setVisibility(View.VISIBLE);
+        updateButton.setVisibility(View.VISIBLE);
+        updateButton.setOnClickListener(v -> {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
+            catch (Exception ignored) { }
+        });
     }
 
     private void cycleMoviesTarget() {
