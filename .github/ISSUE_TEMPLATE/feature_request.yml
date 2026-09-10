@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest an improvement to GTV2STREAM
+title: "[FEATURE] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check ROADMAP.md first. GTV2STREAM is local-first: features that require viewing data to leave the device are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do that GTV2STREAM does not currently support?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: Describe the expected behaviour as concretely as possible.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example flow
+      placeholder: |
+        Given: ...
+        When: ...
+        Then: ...
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Relevant apps, devices, provider behaviour, or screenshots.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I checked ROADMAP.md and existing issues first.
+          required: true
+        - label: This request is compatible with the project's local-first/privacy principles.
+          required: true
