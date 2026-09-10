@@ -1,160 +1,358 @@
-# GTV2STREAM Agent Handoff
+# GTV2STREAM v1.2 Agent Runbook
 
-This file is the working handoff for multi-agent development of GTV2STREAM v1.2.
+This file is the authoritative handoff for coding agents working on GTV2STREAM v1.2.
 
-## Current release goal
+If you are an agent and have been told to work on GTV2STREAM, **read this entire file before editing anything**. Do not infer a different workflow unless the repository owner explicitly tells you to.
 
-v1.2 is a **provider-routing reliability + whitelist + regression-protection** release.
+---
 
-Do not expand scope into Plex/Jellyfin, Fire TV, major UI redesigns, or unrelated features during this release cycle.
+## 0. Mission
 
-## Project guardrails
+GTV2STREAM is an Android TV / Google TV companion app that intercepts Google TV launcher recommendation selections and redirects recognised titles into a configured target app.
 
-- Work from `release/1.2`; never commit feature work directly to `main`.
-- Open PRs against `release/1.2` unless explicitly told otherwise.
-- Preserve the parser's **fail-closed** philosophy: a rare missed title is preferable to redirecting launcher chrome, settings, ads, sponsored content, or ambiguous text.
-- Preserve the project's **local-first/privacy** rules. No telemetry, analytics, accounts, remote backend, or viewing-history collection.
-- Never commit TMDB keys, credentials, signing material, user data, captured private data, or secrets.
-- Keep changes narrowly scoped to the assigned branch/workstream.
-- Add regression coverage for every parser/routing bug fixed.
-- Do not weaken ad/sponsored-content rejection.
-- Avoid broad regex/parser changes unless backed by fixtures/tests.
+Current stable release: `v1.1.0`
 
-## Branch ownership / workstreams
+Current development target: `v1.2`
 
-### 1. Disney/provider parsing
+v1.2 is specifically a:
 
-Branch: `fix/disney-provider-parsing`
+- provider-routing reliability release;
+- provider whitelist release;
+- regression-testing / CI hardening release.
 
-Goal: resolve issue #2 and harden provider-action wording without making title extraction dangerously permissive.
+Do **not** expand the release into Plex, Jellyfin, Fire TV, a UI redesign, analytics, accounts, cloud services, or unrelated feature work.
 
-Focus:
+---
 
-- Inspect `RecommendationTitleParser` and related helpers.
-- Keep `Disney+` / `Disney Plus` provider recognition.
-- Add support for real provider-action wording seen in launcher payloads.
-- Cover representative payload shapes such as:
-  - `Daredevil. Watch on Disney+`
-  - `Daredevil. Available on Disney+`
-  - `Disney+. Daredevil.`
-  - `Daredevil — Disney+`
-  - `Daredevil, Disney+`
-- Cross-check equivalent Netflix, Prime Video, ITVX, etc. cases.
-- Sponsored/advertisement payloads must remain hard rejected.
+## 1. Non-negotiable project rules
 
-PR target: `release/1.2`
+These rules override convenience.
 
-Suggested PR title: `fix: harden provider action parsing`
+1. **Never commit feature work directly to `main`.**
+2. **All v1.2 work targets `release/1.2`.**
+3. Work only on your assigned branch/workstream.
+4. Preserve fail-closed behaviour: missing an ambiguous title is preferable to redirecting launcher UI, settings, ads, sponsored cards, metadata, or prose.
+5. Do not weaken ad or sponsored-content rejection.
+6. Do not add telemetry, analytics, accounts, tracking, remote backends, or viewing-history collection.
+7. Do not commit TMDB keys, API credentials, signing keys, tokens, user data, logs containing private data, or secrets.
+8. Do not change Android permissions unless required by the assigned task and clearly justified in the PR.
+9. Do not refactor unrelated code while fixing a bug.
+10. Every parser/routing bug fix must include regression coverage.
+11. If real launcher behaviour is unknown, do not invent it. Add support only for known payloads or clearly bounded patterns.
+12. If you cannot complete a required validation step, state exactly what was not verified in the PR.
 
-### 2. Provider whitelist
+---
 
-Branch: `feature/whitelist`
+## 2. Repository map
 
-Goal: integrate and validate the provider whitelist requested in issue #1.
+Important files:
 
-Important: **do not recreate this feature from scratch until the owner's existing local implementation has been pushed.** Review/integrate that implementation instead.
+- `README.md` — user-facing behaviour and setup overview.
+- `ROADMAP.md` — public project roadmap.
+- `CHANGELOG.md` — release history.
+- `CONTRIBUTING.md` — contributor build guidance.
+- `app/build.gradle` — Android app config and helper-test tasks.
+- `app/src/main/java/com/gtv2stream/RecommendationTitleParser.java` — Google TV recommendation payload/title parsing.
+- `app/src/main/java/com/gtv2stream/TvRecommendationService.java` — accessibility-event handling and redirect pipeline.
+- `app/src/main/java/com/gtv2stream/AppPrefs.java` — persisted app preferences.
+- `app/src/main/java/com/gtv2stream/SettingsActivity.java` — settings UI.
+- `app/src/main/java/com/gtv2stream/NuvioLauncher.java` — Nuvio launch path.
+- `app/src/main/java/com/gtv2stream/StremioLauncher.java` — Stremio launch path.
+- `app/src/main/java/com/gtv2stream/YouTubeLauncher.java` — SmartTube launch path.
+- `app/src/test/java/com/gtv2stream/DeepLinkHelperTest.java` — current dependency-free JVM regression test harness.
+- `.github/workflows/ci.yml` — v1.2 CI workflow.
 
-Required behaviour:
+Before editing parser/routing behaviour, read at minimum:
 
-- Whitelisted provider recommendation -> GTV2STREAM does nothing and allows normal Google TV behaviour.
-- Non-whitelisted provider recommendation -> normal configured GTV2STREAM redirect.
-- Existing users with no whitelist configured retain current behaviour.
-- Preferences persist across restart.
-- Provider matching must not accidentally whitelist unrelated titles or UI text.
+1. `README.md`
+2. `RecommendationTitleParser.java`
+3. `TvRecommendationService.java`
+4. `DeepLinkHelperTest.java`
 
-PR target: `release/1.2`
+---
 
-Suggested PR title: `feat: add provider whitelist`
+## 3. Start procedure for every agent
 
-### 3. Reliability / payload regression harness
+Run these steps before making changes.
 
-Branch: `chore/reliability-tests`
+```bash
+git fetch origin
+git checkout release/1.2
+git pull --ff-only origin release/1.2
+```
 
-Goal: make real Google TV launcher payload bugs reproducible without needing the physical TV for every code change.
+Then switch to the branch assigned to your workstream.
 
-Prefer a simple fixture-based approach over a large emulator framework.
+If the assigned branch already exists remotely:
 
-Fixtures/tests should cover:
+```bash
+git checkout <assigned-branch>
+git pull --ff-only origin <assigned-branch>
+git merge origin/release/1.2
+```
 
-- movie titles
-- TV titles
-- provider-first payloads
-- provider-last payloads
-- YouTube payloads
-- ads
-- sponsored cards
-- settings/navigation chrome
-- malformed or ambiguous payloads
+If it does not exist:
 
-Desired workflow:
+```bash
+git checkout -b <assigned-branch> origin/release/1.2
+```
 
-`real TV bug -> capture payload once -> add fixture -> regression test forever`
+Do not start from `main`.
 
-PR target: `release/1.2`
+Before editing, run:
 
-Suggested PR title: `test: add Google TV payload regression fixtures`
+```bash
+git status
+git branch --show-current
+```
 
-### 4. CI / release engineering
+Confirm you are on the correct assigned branch and the working tree is clean.
 
-Branch: `chore/ci-release` (create from `release/1.2` when starting)
+---
 
-Goal: make the existing CI useful as the release gate.
+## 4. Workstream selection
 
-Review/improve CI so PRs into `release/1.2` reliably run:
+If the owner gives you a named workstream, follow that section only.
 
-- helper tests
-- Android lint
-- debug APK build
+If the owner simply says "work on v1.2" and gives no specific assignment, do **not** choose randomly. Check open PRs/issues and branch activity first, then take the first incomplete workstream in this priority order:
 
-Also consider:
+1. Reliability / payload regression harness
+2. Disney/provider parser fix
+3. Whitelist integration
+4. CI/release hardening
+5. Independent review
 
-- Gradle cache correctness
-- clear failure output
-- uploading the debug APK as a workflow artifact
-- preparing the later `release/1.2 -> main` release PR
+Do not duplicate work already present in an open PR.
 
-Do not automate signing or public release publishing unless explicitly requested.
+---
 
-PR target: `release/1.2`
+# WORKSTREAM A — Reliability / payload regression harness
 
-Suggested PR title: `ci: harden Android build and test workflow`
+## Branch
 
-## Reviewer role
+`chore/reliability-tests`
 
-After implementation PRs are ready, use a separate reviewer agent that did not author the changes.
+## Goal
 
-Review for:
+Make real Google TV launcher payload bugs reproducible in automated tests so a physical TV is not required for every parser change.
 
-- parser false positives
-- regressions in existing provider/title parsing
-- duplicated provider logic
-- whitelist preference/migration problems
-- secrets or credential leakage
-- privacy/local-first violations
-- unnecessary Android permissions
-- dead/unreachable code
-- tests that pass without exercising the intended behaviour
-- scope creep
+## Scope
 
-The reviewer should review and request targeted fixes, not redesign the project.
+You may modify primarily:
 
-## Merge order
+- `app/src/test/java/com/gtv2stream/DeepLinkHelperTest.java`
+- new test fixture/helper files under `app/src/test/`
+- minimal production-code seams only if absolutely required to make deterministic testing possible
 
-Preferred sequence:
+Do not redesign the application architecture.
 
-1. reliability / fixture tests
-2. Disney/provider parsing fix
-3. whitelist integration
-4. CI/release improvements
-5. independent combined review
-6. release candidate testing on real Google TV hardware
-7. `release/1.2` PR to `main`
+## Required cases
 
-Update/rebase remaining branches after earlier merges where necessary.
+Tests/fixtures must cover representative examples of:
 
-## Required local checks
+- normal movie titles;
+- normal TV titles;
+- provider-first payloads;
+- provider-last payloads;
+- YouTube payloads;
+- advertisements;
+- sponsored cards;
+- Google TV navigation/settings chrome;
+- malformed payloads;
+- ambiguous text that should fail closed.
 
-Before marking implementation work ready:
+Use a simple deterministic fixture model. A fixture should make clear:
+
+- raw payload/input;
+- expected title, if any;
+- expected YouTube/source classification where relevant;
+- whether it should be accepted or rejected.
+
+Do not build a large emulator framework for this workstream.
+
+## Acceptance criteria
+
+- Existing helper tests still pass.
+- New fixture tests fail if the corresponding parser behaviour regresses.
+- Ads, sponsored content, UI chrome and ambiguous text remain rejected.
+- Test data contains no private user information.
+
+## PR
+
+Target: `release/1.2`
+
+Suggested title:
+
+`test: add Google TV payload regression fixtures`
+
+---
+
+# WORKSTREAM B — Disney/provider parsing
+
+## Branch
+
+`fix/disney-provider-parsing`
+
+## Related issue
+
+Issue `#2` — Disney+ links not resolving properly.
+
+## Goal
+
+Harden provider-action parsing without broadly relaxing title detection.
+
+## Important existing behaviour
+
+`Disney+` and `Disney Plus` are already recognised provider names. Treat the likely failure as payload/action-shape handling unless evidence proves otherwise.
+
+Current known action families include variants of:
+
+- `Watch on ...`
+- `Watch Now on ...`
+- `Stream on ...`
+- `Streaming on ...`
+- `New on ...`
+- `Included with ...`
+
+## Required regression inputs
+
+At minimum test bounded forms equivalent to:
+
+```text
+Daredevil. Watch on Disney+
+Daredevil. Available on Disney+
+Disney+. Daredevil.
+Daredevil — Disney+
+Daredevil, Disney+
+```
+
+Also cross-check equivalent forms for at least:
+
+- Netflix;
+- Prime Video;
+- ITVX.
+
+Do not assume every English phrase containing a provider name is a valid action.
+
+## Implementation rules
+
+- Prefer narrow action-pattern additions over permissive free-form matching.
+- Preserve provider stripping so provider names never leak into returned titles.
+- Preserve title punctuation handling, including titles such as `Mr. Robot` and initialisms.
+- Preserve hard rejection of sponsored/advertisement payloads.
+- Do not alter launcher UI-word rejection unless a failing regression test proves it is necessary.
+
+## Acceptance criteria
+
+- Issue #2's known/expected payload forms parse correctly.
+- Equivalent existing provider cases continue to work.
+- No new ad/sponsored/UI false-positive test failures.
+- `runHelperTests`, `lintDebug` and `assembleDebug` pass.
+
+## PR
+
+Target: `release/1.2`
+
+Suggested title:
+
+`fix: harden provider action parsing`
+
+Reference issue `#2` in the PR body.
+
+---
+
+# WORKSTREAM C — Provider whitelist
+
+## Branch
+
+`feature/whitelist`
+
+## Related issue
+
+Issue `#1` — Add a whitelist function.
+
+## Critical instruction
+
+**Do not recreate the whitelist from scratch if the owner's local implementation has not yet been pushed.**
+
+If the assigned branch does not contain a whitelist implementation, stop implementation work and report:
+
+`BLOCKED: owner whitelist implementation is not present on the remote branch yet.`
+
+You may inspect surrounding code and prepare tests/review notes, but do not invent a second competing implementation.
+
+## Required behaviour once implementation exists
+
+A whitelisted provider must bypass GTV2STREAM so Google TV handles the recommendation normally.
+
+Example:
+
+```text
+Prime recommendation
++ Prime Video whitelisted
+=> GTV2STREAM does not redirect
+=> normal Google TV/provider behaviour continues
+```
+
+A non-whitelisted provider continues through the configured redirect target.
+
+Example:
+
+```text
+Netflix recommendation
++ Netflix not whitelisted
+=> normal GTV2STREAM Nuvio/Stremio redirect
+```
+
+Existing users who have configured no whitelist must retain current v1.1 behaviour.
+
+## Review checklist
+
+Verify:
+
+- preferences persist across app restart;
+- empty/default whitelist changes nothing for existing users;
+- provider matching is exact/bounded enough not to whitelist a title accidentally;
+- YouTube behaviour remains correct;
+- ads/sponsored items remain rejected;
+- no new cloud storage/account behaviour is introduced;
+- Settings UI remains usable with a TV remote;
+- any preference migration/default handling is safe.
+
+## Acceptance criteria
+
+- Whitelisted providers bypass redirect.
+- Non-whitelisted providers redirect normally.
+- Existing-user default behaviour is preserved.
+- Required Gradle checks pass.
+
+## PR
+
+Target: `release/1.2`
+
+Suggested title:
+
+`feat: add provider whitelist`
+
+Reference issue `#1` in the PR body.
+
+---
+
+# WORKSTREAM D — CI / release engineering
+
+## Branch
+
+`chore/ci-release`
+
+Create it from the latest `release/1.2` if it does not already exist.
+
+## Goal
+
+Make CI a useful release gate, not a complicated release system.
+
+## Existing required checks
+
+CI should run at least:
 
 ```bash
 ./gradlew :app:runHelperTests --stacktrace
@@ -162,36 +360,282 @@ Before marking implementation work ready:
 ./gradlew :app:assembleDebug --stacktrace
 ```
 
-If a host cannot run an Android/Gradle step, state exactly what was and was not verified in the PR.
+## Tasks
 
-## Real-device release check
+Review/improve `.github/workflows/ci.yml` so that:
 
-The emulator/test harness is not authoritative for Google TV `launcherx` accessibility payloads. Before v1.2 reaches `main`, validate the candidate APK on a real Google TV device against at least:
+- PRs into `release/1.2` run CI;
+- helper tests run;
+- Android lint runs;
+- a debug APK builds;
+- Gradle dependency caching is sensible;
+- failures remain easy to diagnose;
+- the debug APK is uploaded as a workflow artifact if straightforward.
 
-- Disney+
-- Prime Video
-- Netflix
-- ITVX
-- YouTube / SmartTube
-- Nuvio target
-- Stremio target
-- whitelisted provider
-- non-whitelisted provider
-- sponsored card
-- normal launcher navigation/settings interactions
+Do not add signing secrets.
+Do not automate production publishing.
+Do not create GitHub releases automatically in v1.2 unless the owner explicitly requests it.
 
-Captured failures should become regression fixtures whenever possible.
+## Acceptance criteria
 
-## Current repository state
+- Workflow syntax is valid.
+- A PR into `release/1.2` triggers expected checks.
+- CI does not require repository secrets for normal PR validation.
+- Build/test commands match the project's Java 17 / Android build configuration.
 
-- Stable branch: `main` (v1.1.0 baseline)
-- Integration branch: `release/1.2`
-- Existing work branches:
-  - `feature/whitelist`
-  - `fix/disney-provider-parsing`
-  - `chore/reliability-tests`
-- CI workflow exists on `release/1.2`.
-- Issue #1: provider whitelist (`enhancement`)
-- Issue #2: Disney+ links not resolving properly (`bug`)
+## PR
 
-When in doubt: keep the change smaller, preserve fail-closed behaviour, add a regression test, and target `release/1.2`.
+Target: `release/1.2`
+
+Suggested title:
+
+`ci: harden Android build and test workflow`
+
+---
+
+# WORKSTREAM E — Independent reviewer
+
+## Rule
+
+The reviewer should not be the agent that authored the changes under review.
+
+## Inputs
+
+Review all open PRs targeting `release/1.2` plus the resulting combined release branch.
+
+## Review priorities
+
+Look specifically for:
+
+- parser false positives;
+- parser false negatives introduced by over-tightening;
+- duplicated provider recognition logic;
+- action-regex overreach;
+- broken whitelist defaults/migration;
+- title/provider confusion;
+- accidental secret or credential leakage;
+- telemetry/privacy regressions;
+- new unnecessary Android permissions;
+- race/lifecycle regressions in `TvRecommendationService`;
+- dead code;
+- tests that do not actually exercise the intended path;
+- unrelated refactors/scope creep.
+
+## Reviewer output
+
+For each problem provide:
+
+1. severity: blocker / important / minor;
+2. exact file and relevant code area;
+3. concrete failure scenario;
+4. smallest reasonable fix.
+
+Do not redesign the app unless a blocker genuinely requires it.
+
+---
+
+## 5. Required validation before any PR is marked ready
+
+Run from repository root:
+
+```bash
+./gradlew :app:runHelperTests --stacktrace
+./gradlew :app:lintDebug --stacktrace
+./gradlew :app:assembleDebug --stacktrace
+```
+
+Record the result of each in the PR body.
+
+Use this exact format:
+
+```text
+Validation
+- [x] :app:runHelperTests
+- [x] :app:lintDebug
+- [x] :app:assembleDebug
+```
+
+If something cannot run, use:
+
+```text
+- [ ] :app:lintDebug — NOT RUN: <specific reason>
+```
+
+Never mark an unrun test as passed.
+
+---
+
+## 6. Commit rules
+
+Use small, descriptive commits.
+
+Good examples:
+
+```text
+test: add provider payload fixtures
+fix: recognise available-on provider actions
+feat: persist provider whitelist
+ci: upload debug APK artifact
+```
+
+Avoid vague messages such as:
+
+```text
+updates
+fix stuff
+changes
+wip
+```
+
+Do not combine unrelated changes in one commit solely to reduce commit count.
+
+---
+
+## 7. PR rules
+
+Every implementation PR must target `release/1.2`.
+
+PR body must contain:
+
+```markdown
+## What changed
+<short concrete summary>
+
+## Why
+<bug / issue / release reason>
+
+## Behavioural risk
+<what could regress and how the change limits that risk>
+
+## Validation
+- [ ] :app:runHelperTests
+- [ ] :app:lintDebug
+- [ ] :app:assembleDebug
+
+## Real-device testing
+Not required for this PR / Required before release / Completed: <details>
+```
+
+Link the relevant issue where applicable.
+
+Do not merge your own implementation PR unless the owner explicitly asks you to.
+
+---
+
+## 8. Integration / merge order
+
+Preferred order into `release/1.2`:
+
+1. reliability / regression fixtures;
+2. Disney/provider parsing fix;
+3. whitelist integration;
+4. CI/release hardening;
+5. independent combined review;
+6. real Google TV release-candidate validation;
+7. final `release/1.2 -> main` PR.
+
+After an earlier workstream merges, remaining agents should update from `release/1.2` before final validation.
+
+---
+
+## 9. Real-device release gate
+
+Automated tests and Android emulators are useful but are **not authoritative** for the exact accessibility payloads produced by the Google TV `launcherx` package or vendor-specific TV behaviour.
+
+Before v1.2 is merged to `main`, the release candidate must be tested on real Google TV hardware.
+
+Minimum real-device matrix:
+
+- Disney+ recommendation;
+- Prime Video recommendation;
+- Netflix recommendation;
+- ITVX recommendation;
+- YouTube recommendation -> SmartTube;
+- Nuvio target;
+- Stremio target;
+- whitelisted provider;
+- non-whitelisted provider;
+- sponsored/advertisement card;
+- normal launcher navigation;
+- normal settings interactions;
+- accessibility service reconnect/restart behaviour.
+
+If a real-device case fails, capture the smallest useful payload/diagnostic information and convert it into a regression fixture when possible.
+
+---
+
+## 10. Stop conditions
+
+Stop and report rather than guessing if any of these occur:
+
+- the required branch is missing and you cannot create it;
+- the whitelist workstream has no owner's implementation to integrate;
+- fixing a bug appears to require weakening sponsored/ad/UI rejection broadly;
+- a requested change would add telemetry, a remote backend, accounts, or send viewing data off-device;
+- signing credentials or secrets would be required;
+- real Google TV payload data is required but unavailable and the behaviour cannot be bounded safely;
+- the task would require unrelated architectural changes beyond v1.2 scope.
+
+Use this format:
+
+```text
+BLOCKED
+Reason: <specific reason>
+What I verified: <facts>
+What is needed: <smallest missing input/action>
+```
+
+---
+
+## 11. Definition of done for v1.2
+
+v1.2 is ready for a release PR only when all of the following are true:
+
+- provider regression fixture coverage is in place;
+- Disney/provider issue #2 is fixed or explicitly deferred with evidence;
+- whitelist issue #1 is integrated and validated;
+- helper tests pass;
+- lint passes;
+- debug build passes;
+- CI passes on the combined release branch;
+- independent review has no unresolved blockers;
+- real Google TV validation matrix has been completed;
+- `CHANGELOG.md`, `README.md`, and `ROADMAP.md` reflect actual shipped behaviour;
+- version code/name are updated only when preparing the actual release candidate.
+
+---
+
+## 12. Current branch/state summary
+
+Stable:
+
+`main` — v1.1.0 baseline / public stable branch.
+
+Integration:
+
+`release/1.2` — all v1.2 work merges here first.
+
+Existing work branches:
+
+- `chore/reliability-tests`
+- `fix/disney-provider-parsing`
+- `feature/whitelist`
+
+Planned CI branch:
+
+- `chore/ci-release`
+
+Known issues:
+
+- `#1` provider whitelist — enhancement; owner has stated a local implementation exists and should be integrated rather than recreated.
+- `#2` Disney+ links not resolving properly — bug; likely provider/action payload parsing.
+
+CI workflow exists on `release/1.2`.
+
+---
+
+## 13. One-line instruction for an autonomous agent
+
+If you were given no other instructions, follow this exactly:
+
+> Checkout the latest `release/1.2`, read `AGENTS.md`, inspect existing open PRs so you do not duplicate work, take the highest-priority incomplete workstream you can safely execute, work only on its prescribed branch, run all required validation, and open a PR back to `release/1.2`; stop with a precise `BLOCKED` report rather than guessing outside this runbook.
