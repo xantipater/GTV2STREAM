@@ -222,6 +222,16 @@ public final class DeepLinkHelperTest {
         check(MatchCache.get("Landman") == null, "clear evicts"); assertions++;
         check(RecommendationTitleParser.fromEventText(Collections.singletonList("Season 4 • Thriller")).isEmpty(),
                 "metadata-only event rejected"); assertions++;
+
+        // Table-driven fixtures keep representative launcher payloads reproducible and auditable.
+        for (GoogleTvPayloadFixtures.Fixture fixture : GoogleTvPayloadFixtures.all()) {
+            RecommendationTitleParser.Source parsed = fixture.eventText != null
+                    ? RecommendationTitleParser.fromEventTextSource(fixture.eventText)
+                    : RecommendationTitleParser.fromDescriptionSource(fixture.description);
+            check(fixture.title.equals(parsed.title) && fixture.youtube == parsed.youtube,
+                    "payload fixture: " + fixture.name);
+            assertions++;
+        }
         System.out.println("DeepLinkHelperTest: PASS (" + assertions + " assertions)");
     }
 
