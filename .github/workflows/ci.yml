@@ -11,7 +11,7 @@ on:
   pull_request:
     branches:
       - main
-      - 'release/**'
+      - 'release/1.2'
 
 permissions:
   contents: read
@@ -40,6 +40,11 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
+      - name: Print build environment
+        run: |
+          ./gradlew --version
+          java -version
+
       - name: Run helper tests
         run: ./gradlew :app:runHelperTests --stacktrace
 
@@ -48,3 +53,21 @@ jobs:
 
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtv2stream-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtv2stream-ci-diagnostics
+          path: |
+            app/build/reports/**
+            app/build/outputs/logs/**
+          if-no-files-found: ignore
