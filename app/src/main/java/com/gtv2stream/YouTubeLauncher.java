@@ -15,7 +15,7 @@ import android.widget.Toast;
 import java.util.List;
 
 /**
- * Opens a YouTube title search in SmartTube using its declared VIEW handler.
+ * Opens a YouTube title search in the configured target.
  */
 public final class YouTubeLauncher {
     private static final String TAG = "GTV2STREAM";
@@ -23,6 +23,7 @@ public final class YouTubeLauncher {
     /** Current and legacy SmartTube packages declare VIEW handlers for YouTube URLs. */
     static final String SMARTTUBE_STABLE = "org.smarttube.stable";
     static final String SMARTTUBE_BETA = "org.smarttube.beta";
+    static final String TIZENTUBE_COBALT = "io.gh.reisxd.tizentube.cobalt";
 
     /** Fixed smoke-test query, the same one the README documents for direct testing. */
     public static final String TEST_QUERY = "Big Buck Bunny";
@@ -36,23 +37,25 @@ public final class YouTubeLauncher {
             Log.w(TAG, "Empty YouTube search title; nothing to open");
             return false;
         }
-        LaunchSupport.Target target = resolveSmartTube(service, uri);
+        boolean tizentube = YouTubeTarget.isTizenTube(AppPrefs.youtubeTarget(service));
+        LaunchSupport.Target target = tizentube ? resolveTizenTube(service, uri) : resolveSmartTube(service, uri);
         if (target == null) {
-            Log.w(TAG, "SmartTube is not installed");
-            showMissingTarget(service);
+            Log.w(TAG, tizentube ? "TizenTube Cobalt is not installed" : "SmartTube is not installed");
+            showMissingTarget(service, tizentube);
             return false;
         }
-        boolean opened = LaunchSupport.launchFresh(
-                service, uri, target, target.packageName, "Fresh YouTube");
+        boolean opened = tizentube ? launchTizenTube(service, uri, target)
+                : LaunchSupport.launchFresh(service, uri, target, target.packageName, "Fresh YouTube");
         if (!opened) {
-            showMissingTarget(service);
+            showMissingTarget(service, tizentube);
         }
         return opened;
     }
 
-    private static void showMissingTarget(Context context) {
+    private static void showMissingTarget(Context context, boolean tizentube) {
         new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(
-                context, R.string.status_smarttube_missing, Toast.LENGTH_LONG).show());
+                context, tizentube ? R.string.status_tizentube_missing : R.string.status_smarttube_missing,
+                Toast.LENGTH_LONG).show());
     }
 
     /** The settings test follows the same fresh-task behavior as service launches. */
@@ -60,17 +63,22 @@ public final class YouTubeLauncher {
         if (context == null) return false;
         final Context applicationContext = context.getApplicationContext();
         final String uri = TitleResultHelper.youtubeSearchUri(TEST_QUERY);
-        final LaunchSupport.Target target = resolveSmartTube(applicationContext, uri);
+        final boolean tizentube = YouTubeTarget.isTizenTube(AppPrefs.youtubeTarget(applicationContext));
+        final LaunchSupport.Target target = tizentube ? resolveTizenTube(applicationContext, uri)
+                : resolveSmartTube(applicationContext, uri);
         if (target == null) {
-            Log.w(TAG, "SmartTube is not installed");
-            Toast.makeText(context, R.string.status_smarttube_missing, Toast.LENGTH_LONG).show();
+            Log.w(TAG, tizentube ? "TizenTube Cobalt is not installed" : "SmartTube is not installed");
+            Toast.makeText(context, tizentube ? R.string.status_tizentube_missing
+                    : R.string.status_smarttube_missing, Toast.LENGTH_LONG).show();
             return false;
         }
         Thread launchThread = new Thread(() -> {
-            boolean opened = LaunchSupport.launchFresh(
-                    applicationContext, uri, target, target.packageName, "Fresh YouTube");
+            boolean opened = tizentube ? launchTizenTube(applicationContext, uri, target)
+                    : LaunchSupport.launchFresh(applicationContext, uri, target, target.packageName,
+                    "Fresh YouTube");
             if (!opened) {
-                Toast.makeText(applicationContext, R.string.status_smarttube_missing,
+                Toast.makeText(applicationContext, tizentube ? R.string.status_tizentube_missing
+                        : R.string.status_smarttube_missing,
                         Toast.LENGTH_LONG).show();
             }
         }, "gtv2stream-youtube-test");
@@ -100,5 +108,45 @@ public final class YouTubeLauncher {
             }
         }
         return null;
+    }
+
+    /** Cobalt currently has no reliable external VIEW contract (issue #129). Probe VIEW,
+     * then use its declared Leanback/launcher activity as the documented safe fallback. */
+    static LaunchSupport.Target resolveTizenTube(Context context, String uri) {
+        LaunchSupport.Target view = LaunchSupport.resolveHandler(context, uri,
+                java.util.Collections.singletonList(TIZENTUBE_COBALT), true);
+        if (view != null) return view;
+        PackageManager pm = context.getPackageManager();
+        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+                .setPackage(TIZENTUBE_COBALT);
+        List<ResolveInfo> resolved = pm.queryIntentActivities(probe, PackageManager.MATCH_DEFAULT_ONLY);
+        if (resolved == null || resolved.isEmpty()) {
+            probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                    .setPackage(TIZENTUBE_COBALT);
+            resolved = pm.queryIntentActivities(probe, PackageManager.MATCH_DEFAULT_ONLY);
+        }
+        if (resolved == null) return null;
+        for (ResolveInfo candidate : resolved) if (candidate != null && candidate.activityInfo != null
+                && candidate.activityInfo.name != null)
+            return new LaunchSupport.Target(new ComponentName(TIZENTUBE_COBALT, candidate.activityInfo.name));
+        return null;
+    }
+
+    private static boolean launchTizenTube(Context context, String uri, LaunchSupport.Target target) {
+        // A launcher fallback target is a MAIN activity, so do not send it a VIEW URI.
+        LaunchSupport.Target view = LaunchSupport.resolveHandler(context, uri,
+                java.util.Collections.singletonList(TIZENTUBE_COBALT), true);
+        if (view != null) return LaunchSupport.launchFresh(context, uri, view, TIZENTUBE_COBALT,
+                "Fresh TizenTube");
+        try {
+            Intent launch = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+                    .setComponent(target.component)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            context.startActivity(launch);
+            return true;
+        } catch (Exception error) {
+            Log.w(TAG, "TizenTube launcher fallback failed: " + error.getMessage());
+            return false;
+        }
     }
 }

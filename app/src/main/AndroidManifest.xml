@@ -19,6 +19,7 @@
         <package android:name="org.smarttube.beta" />
         <package android:name="com.teamsmart.videomanager.tv" />
         <package android:name="com.liskovsoft.smartyoutubetv2.beta" />
+        <package android:name="io.gh.reisxd.tizentube.cobalt" />
     </queries>
 
     <application

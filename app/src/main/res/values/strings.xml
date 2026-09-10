@@ -13,6 +13,9 @@
     <string name="target_movies_label">TV &amp; movies target: %1$s</string>
     <string name="target_nuvio">Nuvio</string>
     <string name="target_stremio">Stremio</string>
+    <string name="target_youtube_label">YouTube target: %1$s</string>
+    <string name="target_smarttube">SmartTube</string>
+    <string name="target_tizentube">TizenTube Cobalt</string>
     <string name="test_movie">Test TV &amp; movie link</string>
     <string name="test_youtube">Test YouTube search</string>
     <string name="test_link_opened">Opening test link</string>
@@ -34,6 +37,7 @@
     <string name="status_nuvio_missing">No Nuvio handler was found for the test link</string>
     <string name="status_stremio_missing">Stremio was not found; install it or pick Nuvio as the target</string>
     <string name="status_smarttube_missing">SmartTube was not found; install SmartTube to use YouTube redirects</string>
+    <string name="status_tizentube_missing">TizenTube Cobalt was not found or could not be opened</string>
     <string name="key_saved">TMDB key saved locally</string>
     <string name="invalid_key">Enter a valid-looking TMDB key (at least 10 characters)</string>
     <string name="key_rejected">TMDB rejected this key; update it in GTV2STREAM</string>

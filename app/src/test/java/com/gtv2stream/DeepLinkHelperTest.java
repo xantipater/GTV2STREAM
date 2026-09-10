@@ -7,6 +7,10 @@ import java.util.Collections;
 public final class DeepLinkHelperTest {
     public static void main(String[] args) {
         int assertions = 0;
+        check(!YouTubeTarget.isTizenTube(null), "null YouTube target keeps SmartTube default"); assertions++;
+        check(!YouTubeTarget.isTizenTube(YouTubeTarget.SMARTTUBE), "SmartTube target selected"); assertions++;
+        check(YouTubeTarget.isTizenTube(YouTubeTarget.TIZENTUBE), "TizenTube target selected"); assertions++;
+        check(!YouTubeTarget.isTizenTube("unexpected"), "unknown target safely keeps SmartTube"); assertions++;
         TitleMatch movie = new TitleMatch("Iron Man", "2008", "movie", 1726, "tt0371746");
         TitleMatch show = new TitleMatch("Example Show", "2020", "tv", 1, "tt1234567");
         check("nuvio://movie/tt0371746".equals(TitleResultHelper.nuvioUri(movie)), "movie URI"); assertions++;

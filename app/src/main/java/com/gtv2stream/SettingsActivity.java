@@ -31,6 +31,7 @@ public final class SettingsActivity extends Activity {
     private TextView status;
     private EditText keyField;
     private Button moviesTargetButton;
+    private Button youtubeTargetButton;
     private Button badgeToggleButton;
     private Button appInfoButton;
     private TextView updateNotice;
@@ -102,6 +103,9 @@ public final class SettingsActivity extends Activity {
         moviesTargetButton = button(getString(R.string.target_movies_label, currentMoviesTargetName()));
         moviesTargetButton.setOnClickListener(v -> cycleMoviesTarget());
         root.addView(moviesTargetButton, lp(-1, dp(58), 0, 0, 0, 12));
+        youtubeTargetButton = button(getString(R.string.target_youtube_label, currentYoutubeTargetName()));
+        youtubeTargetButton.setOnClickListener(v -> cycleYoutubeTarget());
+        root.addView(youtubeTargetButton, lp(-1, dp(58), 0, 0, 0, 12));
 
         badgeToggleButton = button(getString(R.string.badge_toggle_label, badgeStateName()));
         badgeToggleButton.setOnClickListener(v -> cycleBadge());
@@ -202,9 +206,24 @@ public final class SettingsActivity extends Activity {
         if (moviesTargetButton != null) {
             moviesTargetButton.setText(getString(R.string.target_movies_label, currentMoviesTargetName()));
         }
+        if (youtubeTargetButton != null) youtubeTargetButton.setText(
+                getString(R.string.target_youtube_label, currentYoutubeTargetName()));
         if (badgeToggleButton != null) {
             badgeToggleButton.setText(getString(R.string.badge_toggle_label, badgeStateName()));
         }
+    }
+
+    private void cycleYoutubeTarget() {
+        String next = AppPrefs.YOUTUBE_TIZENTUBE.equals(AppPrefs.youtubeTarget(this))
+                ? AppPrefs.YOUTUBE_SMARTTUBE : AppPrefs.YOUTUBE_TIZENTUBE;
+        getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE).edit()
+                .putString(AppPrefs.TARGET_YOUTUBE, next).apply();
+        refreshTargetButtons();
+    }
+
+    private String currentYoutubeTargetName() {
+        return getString(AppPrefs.YOUTUBE_TIZENTUBE.equals(AppPrefs.youtubeTarget(this))
+                ? R.string.target_tizentube : R.string.target_smarttube);
     }
 
     private String currentMoviesTargetName() {
