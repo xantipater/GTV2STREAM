@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible GTV2STREAM problem
+title: "[BUG] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Please include the launcher payload/logcat output when possible; provider-specific Google TV payloads are especially useful.
+  - type: input
+    id: version
+    attributes:
+      label: GTV2STREAM version
+      placeholder: e.g. 1.1.0
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: TV / device
+      placeholder: e.g. TCL Google TV, Chromecast with Google TV
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android / Google TV version
+      placeholder: e.g. Android 14
+  - type: dropdown
+    id: target
+    attributes:
+      label: Redirect target
+      options:
+        - Nuvio
+        - Stremio
+        - SmartTube
+        - Other / not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you click, what did you expect, and what actually happened?
+      placeholder: |
+        1. Open Google TV home screen
+        2. Select ...
+        3. GTV2STREAM ...
+    validations:
+      required: true
+  - type: textarea
+    id: payload
+    attributes:
+      label: Launcher payload / logs
+      description: Paste relevant ADB logcat lines or accessibility payload text. Remove anything you consider private.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Screenshots, provider name, title, or anything else that may help.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I checked ROADMAP.md and existing issues first.
+          required: true
+        - label: This report does not include a TMDB API key or other secret.
+          required: true
