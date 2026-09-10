@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Roadmap
+    url: https://github.com/xantipater/GTV2STREAM/blob/main/ROADMAP.md
+    about: Check supported, in-progress, and investigated features before opening an issue.
