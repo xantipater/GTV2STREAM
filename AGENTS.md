@@ -564,7 +564,113 @@ If a real-device case fails, capture the smallest useful payload/diagnostic info
 
 ---
 
-## 10. Stop conditions
+## 10. What good looks like
+
+Passing tests is necessary, but it is not enough. A change is good only when the implementation is small, bounded, understandable, regression-protected, and does not quietly alter unrelated behaviour.
+
+### Good implementation standard
+
+For every implementation or bug fix, aim for all of the following:
+
+- Solve the assigned problem, not a larger adjacent problem.
+- Change the smallest reasonable amount of production code.
+- Reuse existing helpers and concepts rather than creating duplicate provider/parser logic.
+- Keep behaviour explicit and bounded. Avoid broad heuristics when a narrow rule will solve the observed case.
+- Add a regression test that would fail on the previous behaviour and pass with the fix.
+- Add negative/boundary coverage where the change could create false positives.
+- Preserve all existing tests and established v1.1 behaviour unless the workstream explicitly changes it.
+- Keep code readable enough that another maintainer can understand why the rule exists without reconstructing the entire bug report.
+- Avoid speculative abstractions, premature frameworks, and unrelated cleanup.
+- Make the PR explain exactly what changed, why it is safe, what could regress, and what was actually tested.
+
+### Parser-specific quality bar
+
+For parser/routing changes, "good" means more than recognising the new input. The change must also show that nearby unsafe inputs remain rejected.
+
+A good parser fix normally includes:
+
+- at least one positive case for the reported/target payload;
+- equivalent positive cases for relevant existing providers where the rule is provider-agnostic;
+- at least one negative or boundary case showing the new rule is not free-form;
+- confirmation that sponsored/advertisement content remains rejected;
+- confirmation that launcher UI/settings text remains rejected where relevant;
+- confirmation that title punctuation/provider stripping still behaves correctly.
+
+### Example: bad vs good
+
+Bad:
+
+```text
+Problem: Disney+ "Available on" payload is missed.
+Change: accept any string containing "Disney+" or "available".
+Tests: one Disney+ happy-path test.
+Result: test passes, but parser is now broadly more permissive.
+```
+
+Good:
+
+```text
+Observed/target payload:
+Daredevil. Available on Disney+
+
+Before:
+The action suffix is not recognised, so the payload is rejected or misparsed.
+
+Change:
+Add one bounded "Available on <provider>" action family using the existing provider/title parsing path.
+
+Regression coverage:
+- Disney+ positive case
+- Netflix equivalent positive case
+- Prime Video equivalent positive case
+- ITVX equivalent positive case
+- sponsored equivalent remains rejected
+- unrelated UI text containing "available" remains rejected
+- existing punctuation/title cases still pass
+
+Result:
+The known payload shape works without turning provider recognition into free-form text matching.
+```
+
+### Tests must prove behaviour, not decorate the PR
+
+A test is useful only if it exercises the behaviour that could break.
+
+Do not add assertions that merely repeat implementation constants or cannot fail when the real bug returns. For bug fixes, prefer a test input representing the actual failing shape and assert the externally meaningful result: parsed title, source classification, acceptance/rejection, bypass/redirect decision, or generated deep link as appropriate.
+
+When practical, confirm the new regression test would fail against the pre-fix behaviour before relying on it as proof of the fix.
+
+### Mandatory pre-PR self-review gate
+
+Before opening or marking a PR ready, answer these questions yourself. If any answer is "no" or "I don't know", fix the problem or report the uncertainty before declaring the work complete.
+
+1. Did I solve the assigned problem rather than expanding scope?
+2. Is this the smallest safe implementation I can reasonably make?
+3. Is there a regression test that proves the intended new/fixed behaviour?
+4. Where permissiveness changed, is there a negative/boundary test proving it did not become too broad?
+5. Do all existing tests still pass?
+6. Did I reuse existing logic instead of duplicating provider/parser/state handling?
+7. Did I avoid unrelated refactors and cosmetic churn?
+8. Could an existing v1.1 user encounter an unintended behaviour change from this diff?
+9. Can I explain why every production-code change in this PR is necessary for the assigned task?
+10. Did I verify rather than assume the required build/test results?
+11. Does the PR clearly distinguish emulator/unit-test confidence from real Google TV validation?
+12. Would I be comfortable having another maintainer merge this based only on the diff, tests and PR explanation, without relying on "probably works"?
+
+### Do not call work complete when
+
+- only the happy path was tested;
+- tests were not run but the PR implies they passed;
+- the implementation solves the issue by broadly weakening rejection rules;
+- a large refactor is mixed with a small bug fix without necessity;
+- the new code duplicates existing provider/title logic;
+- real-device behaviour is claimed without real-device evidence;
+- the implementation depends on guessed launcher payloads that were not safely bounded;
+- comments or PR text promise behaviour that the tests/code do not demonstrate.
+
+---
+
+## 11. Stop conditions
 
 Stop and report rather than guessing if any of these occur:
 
@@ -587,7 +693,7 @@ What is needed: <smallest missing input/action>
 
 ---
 
-## 11. Definition of done for v1.2
+## 12. Definition of done for v1.2
 
 v1.2 is ready for a release PR only when all of the following are true:
 
@@ -605,7 +711,7 @@ v1.2 is ready for a release PR only when all of the following are true:
 
 ---
 
-## 12. Current branch/state summary
+## 13. Current branch/state summary
 
 Stable:
 
@@ -634,8 +740,8 @@ CI workflow exists on `release/1.2`.
 
 ---
 
-## 13. One-line instruction for an autonomous agent
+## 14. One-line instruction for an autonomous agent
 
 If you were given no other instructions, follow this exactly:
 
-> Checkout the latest `release/1.2`, read `AGENTS.md`, inspect existing open PRs so you do not duplicate work, take the highest-priority incomplete workstream you can safely execute, work only on its prescribed branch, run all required validation, and open a PR back to `release/1.2`; stop with a precise `BLOCKED` report rather than guessing outside this runbook.
+> Checkout the latest `release/1.2`, read `AGENTS.md` completely, inspect existing open PRs so you do not duplicate work, take the highest-priority incomplete workstream you can safely execute, work only on its prescribed branch, meet the "What good looks like" quality bar, run all required validation, perform the mandatory self-review, and open a PR back to `release/1.2`; stop with a precise `BLOCKED` report rather than guessing outside this runbook.
