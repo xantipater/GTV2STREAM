@@ -76,6 +76,34 @@ public final class DeepLinkHelperTest {
                 "Mr. Robot. Watch on Paramount+")),
                 "punctuated title with provider action"); assertions++;
 
+        // Available-on actions are emitted by provider cards, including Disney+.
+        check("Daredevil".equals(RecommendationTitleParser.fromDescription(
+                "Daredevil. Available on Disney+")),
+                "Disney+ available-on action recognized"); assertions++;
+        check("Daredevil".equals(RecommendationTitleParser.fromDescription(
+                "Disney+. Daredevil.")),
+                "Disney+ provider-first title recognized"); assertions++;
+        check("Daredevil".equals(RecommendationTitleParser.fromDescription(
+                "Daredevil — Disney+")),
+                "Disney+ dash provider recognized"); assertions++;
+        check("The Witcher".equals(RecommendationTitleParser.fromDescription(
+                "The Witcher. Available on Netflix")),
+                "Netflix available-on action recognized"); assertions++;
+        check("The Boys".equals(RecommendationTitleParser.fromDescription(
+                "The Boys. Available on Prime Video")),
+                "Prime available-on action recognized"); assertions++;
+        check("Vigil".equals(RecommendationTitleParser.fromDescription(
+                "Vigil. Available on ITVX")),
+                "ITVX available-on action recognized"); assertions++;
+        check(RecommendationTitleParser.fromDescription("Available on Disney+").isEmpty(),
+                "available-on provider label rejected"); assertions++;
+        check(RecommendationTitleParser.fromDescription("Sponsored. Daredevil. Available on Disney+").isEmpty(),
+                "sponsored available-on payload rejected"); assertions++;
+        check(RecommendationTitleParser.fromDescription("Dune. Available on Friday").isEmpty(),
+                "unknown available-on target rejected"); assertions++;
+        check(RecommendationTitleParser.fromDescription("Available on your home screen").isEmpty(),
+                "prose available-on phrase rejected"); assertions++;
+
         // Provider action-suffix variants across every provider name.
         check("Landman".equals(RecommendationTitleParser.fromDescription(
                 "Landman. Streaming on Hulu.")),

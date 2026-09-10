@@ -21,6 +21,8 @@ public final class RecommendationTitleParser {
     private static final Pattern ACTION_SUFFIX = Pattern.compile(
             "(?i)(?:(?:watch|stream|streaming|new)(?:\\s+now)?\\s+on"
                     + "|included\\s+with)\\s+[^.,]+[.!?]?\\s*$");
+    private static final Pattern AVAILABLE_ACTION_SUFFIX = Pattern.compile(
+            "(?i)\\bavailable\\s+on\\s+([^.,]+)[.!?]?\\s*$");
     private static final Pattern GRID_LABEL = Pattern.compile("(?i)^(?:column|row)\\s+\\d+$");
     private static final Pattern INITIALISM = Pattern.compile("(?i)^(?:[a-z]\\.){2,}$");
     private static final Set<String> PROVIDERS = setOf(
@@ -150,6 +152,12 @@ public final class RecommendationTitleParser {
         boolean youtube = isYoutubeAction(lowerValue);
 
         String withoutAction = ACTION_SUFFIX.matcher(value).replaceFirst("").trim();
+        if (withoutAction.equals(value)) {
+            java.util.regex.Matcher available = AVAILABLE_ACTION_SUFFIX.matcher(value);
+            if (available.find() && isProvider(available.group(1).trim())) {
+                withoutAction = value.substring(0, available.start()).trim();
+            }
+        }
         boolean hasWatchAction = !withoutAction.equals(value);
         if (withoutAction.isEmpty()) return Source.NONE;
 
