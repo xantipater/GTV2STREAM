@@ -15,18 +15,19 @@ import java.util.regex.Pattern;
 /** Pure title matching and Nuvio URI logic, kept separate for deterministic tests. */
 public final class TitleResultHelper {
     private static final Pattern YEAR = Pattern.compile("(?<!\\d)((?:19|20)\\d{2})(?!\\d)");
-    private static final Pattern WATCH_ACTION = Pattern.compile(
-            "(?i)\\.?\\s*Watch(?:\\s+Now)?\\s+on\\s+[^.]+\\s*$");
+    private static final Pattern BRACKETED = Pattern.compile("\\[[^]]*]");
+    private static final Pattern YEAR_PAREN = Pattern.compile("\\((?:19|20)\\d{2}\\)");
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+    private static final Pattern NON_ALNUM_RUN = Pattern.compile("[^a-z0-9]+");
 
     private TitleResultHelper() { }
 
     public static String cleanTitle(String raw) {
         if (raw == null) return "";
         String value = raw.replace('\n', ' ').replace('\r', ' ').trim();
-        value = value.replaceAll("\\[[^]]*]", " ");
-        value = value.replaceAll("\\((?:19|20)\\d{2}\\)", " ");
-        value = value.replaceAll("\\s+", " ").trim();
-        return value;
+        value = BRACKETED.matcher(value).replaceAll(" ");
+        value = YEAR_PAREN.matcher(value).replaceAll(" ");
+        return WHITESPACE.matcher(value).replaceAll(" ").trim();
     }
 
     /** Compatibility entry point for callers that need the clean-room parser. */
@@ -47,7 +48,7 @@ public final class TitleResultHelper {
 
     /** Normalization used for UI title comparisons: punctuation and case are ignored. */
     public static String normalizedTitle(String raw) {
-        return cleanTitle(raw).toLowerCase(Locale.US).replaceAll("[^a-z0-9]+", " ").trim();
+        return NON_ALNUM_RUN.matcher(cleanTitle(raw).toLowerCase(Locale.US)).replaceAll(" ").trim();
     }
 
     public static boolean normalizedTitleMatches(String expected, String observed) {
@@ -105,6 +106,19 @@ public final class TitleResultHelper {
         if (match == null || match.imdbId == null || !match.imdbId.matches("tt\\d+")) return null;
         if ("movie".equals(match.mediaType)) return "stremio:///detail/movie/" + match.imdbId;
         if ("tv".equals(match.mediaType)) return "stremio:///detail/series/" + match.imdbId;
+        return null;
+    }
+
+    /**
+     * WuPlay's IMDb-backed detail deep link. WuPlay is a Stremio-family client
+     * like Nuvio, but its own scheme is flat (no {@code /detail}) and it is NOT
+     * a forked Stremio scheme, so it needs its own resolver rather than sharing
+     * Stremio's.
+     */
+    public static String wuplayUri(TitleMatch match) {
+        if (match == null || match.imdbId == null || !match.imdbId.matches("tt\\d+")) return null;
+        if ("movie".equals(match.mediaType)) return "wuplay://movie/" + match.imdbId;
+        if ("tv".equals(match.mediaType)) return "wuplay://series/" + match.imdbId;
         return null;
     }
 

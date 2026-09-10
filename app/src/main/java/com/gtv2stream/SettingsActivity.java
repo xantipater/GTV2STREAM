@@ -2,6 +2,7 @@ package com.gtv2stream;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.AppOpsManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -20,22 +21,32 @@ import android.view.Window;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.List;
+import java.util.Set;
 
 public final class SettingsActivity extends Activity {
     private TextView status;
     private EditText keyField;
     private Button moviesTargetButton;
     private Button youtubeTargetButton;
+    private Button movieTestButton;
+    private Button youtubeTestButton;
     private Button badgeToggleButton;
     private Button appInfoButton;
+    private TextView whitelistSummary;
+    private LinearLayout whitelistRows;
     private TextView updateNotice;
     private Button updateButton;
+    private Button downloadUpdateButton;
+    private TextView updateStatus;
+    private UpdateChecker.UpdateInfo pendingUpdate;
+    private ApkUpdater.DownloadHandle updateDownload;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -47,6 +58,8 @@ public final class SettingsActivity extends Activity {
         super.onResume();
         if (status != null) updateStatus();
         if (moviesTargetButton != null) refreshTargetButtons();
+        refreshWhitelistRows();
+        refreshTestButtons();
     }
 
     private void buildUi() {
@@ -61,9 +74,15 @@ public final class SettingsActivity extends Activity {
         root.setBackgroundColor(Color.rgb(16, 19, 26));
         scroll.addView(root, new ScrollView.LayoutParams(-1, -1));
 
-        TextView title = text(getString(R.string.app_name), 30, Color.WHITE);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        root.addView(title, lp(-1, -2, 0, 0, 0, 10));
+        ImageView wordmark = new ImageView(this);
+        wordmark.setImageResource(R.drawable.gtv2stream_logo);
+        wordmark.setContentDescription(getString(R.string.app_name));
+        wordmark.setAdjustViewBounds(true);
+        wordmark.setFocusable(false);
+        wordmark.setFocusableInTouchMode(false);
+        LinearLayout.LayoutParams wordmarkParams = lp(-1, dp(96), 0, 0, 0, 10);
+        wordmarkParams.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(wordmark, wordmarkParams);
         TextView subtitle = text(getString(R.string.app_subtitle), 17, Color.rgb(183, 192, 208));
         root.addView(subtitle, lp(-1, -2, 0, 0, 0, 22));
 
@@ -79,6 +98,12 @@ public final class SettingsActivity extends Activity {
         updateButton = button(getString(R.string.open_update));
         updateButton.setVisibility(View.GONE);
         root.addView(updateButton, lp(-1, dp(58), 0, 0, 0, 12));
+        downloadUpdateButton = button("");
+        downloadUpdateButton.setVisibility(View.GONE);
+        root.addView(downloadUpdateButton, lp(-1, dp(58), 0, 0, 0, 12));
+        updateStatus = text("", 16, Color.rgb(183, 192, 208));
+        updateStatus.setVisibility(View.GONE);
+        root.addView(updateStatus, lp(-1, -2, 0, 0, 0, 12));
 
         TextView keyLabel = text(getString(R.string.tmdb_key_label), 18, Color.WHITE);
         root.addView(keyLabel, lp(-1, -2, 0, 0, 0, 7));
@@ -98,8 +123,6 @@ public final class SettingsActivity extends Activity {
         save.setOnClickListener(v -> saveKey());
         root.addView(save, lp(-1, dp(58), 0, 0, 0, 18));
 
-        TextView targetsLabel = text(getString(R.string.target_movies_label, currentMoviesTargetName()), 18, Color.WHITE);
-        root.addView(targetsLabel, lp(-1, -2, 0, 0, 0, 7));
         moviesTargetButton = button(getString(R.string.target_movies_label, currentMoviesTargetName()));
         moviesTargetButton.setOnClickListener(v -> cycleMoviesTarget());
         root.addView(moviesTargetButton, lp(-1, dp(58), 0, 0, 0, 12));
@@ -107,9 +130,33 @@ public final class SettingsActivity extends Activity {
         youtubeTargetButton.setOnClickListener(v -> cycleYoutubeTarget());
         root.addView(youtubeTargetButton, lp(-1, dp(58), 0, 0, 0, 12));
 
+        Button accessibility = button(getString(R.string.open_accessibility));
+        accessibility.setOnClickListener(v -> {
+            try { startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); }
+            catch (Exception error) { Toast.makeText(this, "Accessibility Settings unavailable", Toast.LENGTH_LONG).show(); }
+        });
+        root.addView(accessibility, lp(-1, dp(58), 0, 0, 0, 12));
+
+        movieTestButton = button(testMovieLabel());
+        movieTestButton.setOnClickListener(v -> runMovieTest());
+        root.addView(movieTestButton, lp(-1, dp(58), 0, 0, 0, 12));
+
+        youtubeTestButton = button(testYoutubeLabel());
+        youtubeTestButton.setOnClickListener(v -> runYoutubeTest());
+        root.addView(youtubeTestButton, lp(-1, dp(58), 0, 0, 0, 12));
+
         badgeToggleButton = button(getString(R.string.badge_toggle_label, badgeStateName()));
         badgeToggleButton.setOnClickListener(v -> cycleBadge());
         root.addView(badgeToggleButton, lp(-1, dp(58), 0, 0, 0, 12));
+
+        whitelistSummary = text(getString(R.string.whitelist_label, whitelistSummaryText()), 18, Color.WHITE);
+        root.addView(whitelistSummary, lp(-1, -2, 0, 0, 0, 7));
+        whitelistRows = new LinearLayout(this);
+        whitelistRows.setOrientation(LinearLayout.VERTICAL);
+        root.addView(whitelistRows, lp(-1, -2, 0, 0, 0, 4));
+        buildWhitelistRows();
+        TextView whitelistNote = text(getString(R.string.whitelist_note), 15, Color.rgb(183, 192, 208));
+        root.addView(whitelistNote, lp(-1, -2, 0, 0, 0, 12));
 
         appInfoButton = button(getString(R.string.open_app_info));
         appInfoButton.setOnClickListener(v -> {
@@ -122,13 +169,6 @@ public final class SettingsActivity extends Activity {
         });
         root.addView(appInfoButton, lp(-1, dp(58), 0, 0, 0, 12));
         appInfoButton.setVisibility(View.GONE);
-
-        Button accessibility = button(getString(R.string.open_accessibility));
-        accessibility.setOnClickListener(v -> {
-            try { startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); }
-            catch (Exception error) { Toast.makeText(this, "Accessibility Settings unavailable", Toast.LENGTH_LONG).show(); }
-        });
-        root.addView(accessibility, lp(-1, dp(58), 0, 0, 0, 12));
 
         if (!Settings.canDrawOverlays(this)) {
             Button overlay = button(getString(R.string.enable_overlay));
@@ -148,47 +188,283 @@ public final class SettingsActivity extends Activity {
         help.setOnClickListener(v -> startActivity(new Intent(this, HelpActivity.class)));
         root.addView(help, lp(-1, dp(58), 0, 0, 0, 12));
 
-        Button movieTest = button(getString(R.string.test_movie));
-        movieTest.setOnClickListener(v -> {
-            boolean stremio = AppPrefs.MOVIES_STREMIO.equals(AppPrefs.moviesTarget(this));
-            boolean opened = stremio ? StremioLauncher.openTest(this) : NuvioLauncher.openTest(this);
-            if (opened) Toast.makeText(this, R.string.test_link_opened, Toast.LENGTH_SHORT).show();
-        });
-        root.addView(movieTest, lp(-1, dp(58), 0, 0, 0, 12));
-
-        Button youtubeTest = button(getString(R.string.test_youtube));
-        youtubeTest.setOnClickListener(v -> {
-            boolean opened = YouTubeLauncher.openTest(this);
-            if (opened) Toast.makeText(this, R.string.test_youtube_opened, Toast.LENGTH_SHORT).show();
-        });
-        root.addView(youtubeTest, lp(-1, dp(58), 0, 0, 0, 18));
-
         TextView note = text(getString(R.string.settings_note), 15, Color.rgb(183, 192, 208));
         note.setLineSpacing(0, 1.15f);
-        root.addView(note, lp(-1, -2, 0, 0, 0, 0));
+        root.addView(note, lp(-1, -2, 0, 0, 0, 12));
+        TextView versionFooter = text(getString(R.string.version_footer, appVersionName()), 14,
+                Color.rgb(130, 140, 155));
+        versionFooter.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.addView(versionFooter, lp(-1, -2, 0, 0, 0, 0));
         setContentView(scroll);
         refreshTargetButtons();
-        UpdateChecker.check(this, (version, url) -> showUpdate(version, url));
+        refreshTestButtons();
+        UpdateChecker.check(this, this::showUpdate);
     }
 
-    private void showUpdate(String version, String url) {
+    private void showUpdate(UpdateChecker.UpdateInfo info) {
         if (isFinishing() || (Build.VERSION.SDK_INT >= 17 && isDestroyed())
                 || updateNotice == null || updateButton == null) return;
-        updateNotice.setText(getString(R.string.update_available, version));
+        pendingUpdate = info;
+        updateNotice.setText(getString(R.string.update_available, info.version));
         updateNotice.setVisibility(View.VISIBLE);
         updateButton.setVisibility(View.VISIBLE);
-        updateButton.setOnClickListener(v -> {
-            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
-            catch (Exception ignored) { }
+        updateButton.setOnClickListener(v -> openReleasePage(info));
+        if (downloadUpdateButton != null) {
+            if (info.apkUrl != null) {
+                downloadUpdateButton.setText(getString(R.string.download_update, info.version));
+                downloadUpdateButton.setOnClickListener(v -> startOneTapUpdate());
+                downloadUpdateButton.setVisibility(View.VISIBLE);
+            } else {
+                downloadUpdateButton.setVisibility(View.GONE);
+            }
+        }
+        maybePromptForUpdate(info);
+    }
+
+    /** Opens the release page in the system browser. */
+    private void openReleasePage(UpdateChecker.UpdateInfo info) {
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(info.pageUrl))); }
+        catch (Exception ignored) { }
+    }
+
+    /**
+     * Asks the user to update, once per release. Opening the app is the only
+     * surface this app has, so this is the one moment a user can be asked; the
+     * inline notice and its buttons stay visible for anyone who taps Later,
+     * which keeps the prompt from becoming a nag.
+     */
+    private void maybePromptForUpdate(UpdateChecker.UpdateInfo info) {
+        if (info == null || info.version == null || info.version.isEmpty()) return;
+        android.content.SharedPreferences prefs = getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE);
+        if (info.version.equals(prefs.getString(AppPrefs.UPDATE_PROMPTED_VERSION, ""))) return;
+        prefs.edit().putString(AppPrefs.UPDATE_PROMPTED_VERSION, info.version).apply();
+        final boolean canOneTap = info.apkUrl != null;
+        AlertDialog.Builder prompt = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.update_available, info.version))
+                .setMessage(getString(canOneTap
+                        ? R.string.update_prompt_message : R.string.update_prompt_page_message))
+                .setNegativeButton(getString(R.string.update_later), null);
+        if (canOneTap) {
+            prompt.setPositiveButton(getString(R.string.download_update, info.version),
+                    (dialog, which) -> startOneTapUpdate());
+            prompt.setNeutralButton(getString(R.string.open_update),
+                    (dialog, which) -> openReleasePage(info));
+        } else {
+            prompt.setPositiveButton(getString(R.string.open_update),
+                    (dialog, which) -> openReleasePage(info));
+        }
+        prompt.show();
+    }
+
+    /**
+     * Android needs "Install unknown apps" allowed before it will accept the
+     * package. Say where to go and take them there: on a TV that settings tree is
+     * buried deep enough that instructional text alone strands people.
+     */
+    private void showAllowInstallsAction() {
+        if (updateButton == null) return;
+        updateButton.setText(R.string.update_allow_installs);
+        updateButton.setOnClickListener(v -> openUnknownSourcesSettings());
+        updateButton.setVisibility(View.VISIBLE);
+    }
+
+    /** This app's "install unknown apps" page, with an app-details fallback. */
+    private void openUnknownSourcesSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Exception unavailable) {
+            try {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + getPackageName())));
+            } catch (Exception ignored) { }
+        }
+    }
+
+    private void startOneTapUpdate() {
+        if (pendingUpdate == null || pendingUpdate.apkUrl == null) {
+            setUpdateStatus(getString(R.string.update_no_apk));
+            return;
+        }
+        downloadUpdateButton.setText(getString(R.string.cancel_download));
+        downloadUpdateButton.setOnClickListener(v -> cancelOneTapUpdate());
+        setUpdateStatus(getString(R.string.update_download_unknown));
+        updateDownload = ApkUpdater.startUpdate(this, pendingUpdate, new ApkUpdater.Listener() {
+            @Override public void onProgress(long downloaded, long total) {
+                runOnUiThread(() -> {
+                    if (total > 0L) {
+                        int percent = (int) Math.min(100L, (downloaded * 100L) / total);
+                        setUpdateStatus(getString(R.string.update_downloading, percent));
+                    } else {
+                        setUpdateStatus(getString(R.string.update_download_unknown));
+                    }
+                });
+            }
+
+            @Override public void onFailure(UpdateChecker.Failure failure) {
+                runOnUiThread(() -> {
+                    resetDownloadButton();
+                    setUpdateStatus(updateFailureText(failure));
+                    // The one failure the user can actually fix gets an action,
+                    // not just an explanation.
+                    if (failure == UpdateChecker.Failure.UNKNOWN_SOURCES) {
+                        showAllowInstallsAction();
+                    }
+                });
+            }
+
+            @Override public void onCancelled() {
+                runOnUiThread(() -> {
+                    resetDownloadButton();
+                    setUpdateStatus(getString(R.string.update_cancelled));
+                });
+            }
+
+            @Override public void onInstallPrompt() {
+                runOnUiThread(() -> {
+                    resetDownloadButton();
+                    setUpdateStatus(getString(R.string.update_confirm_install));
+                });
+            }
+
+            @Override public void onInstalled() {
+                runOnUiThread(() -> {
+                    resetDownloadButton();
+                    setUpdateStatus(getString(R.string.update_installed));
+                });
+            }
         });
+    }
+
+    private void cancelOneTapUpdate() {
+        ApkUpdater.cancelActive();
+        updateDownload = null;
+        resetDownloadButton();
+        setUpdateStatus(getString(R.string.update_cancelled));
+    }
+
+    private void resetDownloadButton() {
+        updateDownload = null;
+        if (downloadUpdateButton != null && pendingUpdate != null && pendingUpdate.apkUrl != null) {
+            downloadUpdateButton.setText(getString(R.string.download_update, pendingUpdate.version));
+            downloadUpdateButton.setOnClickListener(v -> startOneTapUpdate());
+            downloadUpdateButton.setVisibility(View.VISIBLE);
+        } else if (downloadUpdateButton != null) {
+            downloadUpdateButton.setVisibility(View.GONE);
+        }
+    }
+
+    private String updateFailureText(UpdateChecker.Failure failure) {
+        if (failure == null) return getString(R.string.update_network_error);
+        switch (failure) {
+            case OFFLINE: return getString(R.string.update_offline);
+            case TIMEOUT: return getString(R.string.update_timeout);
+            case CORRUPT: return getString(R.string.update_corrupt);
+            case NO_APK: return getString(R.string.update_no_apk);
+            case UNKNOWN_SOURCES: return getString(R.string.update_unknown_sources);
+            case INSTALL_CANCELLED: return getString(R.string.update_install_cancelled);
+            case INSTALL_FAILED: return getString(R.string.update_install_failed);
+            case NETWORK:
+            default: return getString(R.string.update_network_error);
+        }
+    }
+
+    private void setUpdateStatus(String message) {
+        if (updateStatus == null) return;
+        updateStatus.setText(message);
+        updateStatus.setVisibility(View.VISIBLE);
+    }
+
+    @Override protected void onDestroy() {
+        ApkUpdater.cancelActive();
+        super.onDestroy();
     }
 
     private void cycleMoviesTarget() {
-        boolean stremio = AppPrefs.MOVIES_STREMIO.equals(AppPrefs.moviesTarget(this));
-        String next = stremio ? AppPrefs.MOVIES_NUVIO : AppPrefs.MOVIES_STREMIO;
+        String next = LaunchPolicy.nextMoviesTarget(AppPrefs.moviesTarget(this));
         getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE).edit()
                 .putString(AppPrefs.TARGET_MOVIES, next).apply();
         refreshTargetButtons();
+        refreshTestButtons();
+    }
+
+    /** Runs the TV/movie test for the active target and reports the real outcome. */
+    private void runMovieTest() {
+        String target = AppPrefs.moviesTarget(this);
+        String targetName = currentMoviesTargetName();
+        if (AppPrefs.MOVIES_STREMIO.equals(target)) {
+            StremioLauncher.openTest(this, new StremioLauncher.TestCallback() {
+                @Override public void onMissingTarget() {
+                    runOnUiThread(() -> Toast.makeText(SettingsActivity.this,
+                            getString(R.string.status_stremio_missing), Toast.LENGTH_LONG).show());
+                }
+                @Override public void onResult(boolean opened) {
+                    runOnUiThread(() -> Toast.makeText(SettingsActivity.this,
+                            getString(opened ? R.string.test_link_opened : R.string.test_link_failed,
+                                    targetName),
+                            opened ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show());
+                }
+            });
+        } else if (AppPrefs.MOVIES_WUPLAY.equals(target)) {
+            WuPlayLauncher.openTest(this, new WuPlayLauncher.TestCallback() {
+                @Override public void onMissingTarget() {
+                    runOnUiThread(() -> Toast.makeText(SettingsActivity.this,
+                            getString(R.string.status_wuplay_missing), Toast.LENGTH_LONG).show());
+                }
+                @Override public void onResult(boolean opened) {
+                    runOnUiThread(() -> Toast.makeText(SettingsActivity.this,
+                            getString(opened ? R.string.test_link_opened : R.string.test_link_failed,
+                                    targetName),
+                            opened ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show());
+                }
+            });
+        } else {
+            NuvioLauncher.openTest(this, new NuvioLauncher.TestCallback() {
+                @Override public void onMissingTarget() {
+                    runOnUiThread(() -> Toast.makeText(SettingsActivity.this,
+                            getString(R.string.status_nuvio_missing), Toast.LENGTH_LONG).show());
+                }
+                @Override public void onResult(boolean opened) {
+                    runOnUiThread(() -> Toast.makeText(SettingsActivity.this,
+                            getString(opened ? R.string.test_link_opened : R.string.test_link_failed,
+                                    targetName),
+                            opened ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show());
+                }
+            });
+        }
+    }
+
+    /** Runs the YouTube test for the active target and reports the real outcome. */
+    private void runYoutubeTest() {
+        String targetName = currentYoutubeTargetName();
+        boolean tizentube = YouTubeTarget.isTizenTube(AppPrefs.youtubeTarget(this));
+        YouTubeLauncher.openTest(this, new YouTubeLauncher.TestCallback() {
+            @Override public void onMissingTarget() {
+                runOnUiThread(() -> Toast.makeText(SettingsActivity.this,
+                        getString(tizentube ? R.string.status_tizentube_missing
+                                : R.string.status_smarttube_missing),
+                        Toast.LENGTH_LONG).show());
+            }
+            @Override public void onResult(boolean opened) {
+                runOnUiThread(() -> Toast.makeText(SettingsActivity.this,
+                        getString(opened ? R.string.test_link_opened : R.string.test_link_failed,
+                                targetName),
+                        opened ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    private String testMovieLabel() {
+        return getString(R.string.test_movie, currentMoviesTargetName());
+    }
+
+    private String testYoutubeLabel() {
+        return getString(R.string.test_youtube, currentYoutubeTargetName());
+    }
+
+    private void refreshTestButtons() {
+        if (movieTestButton != null) movieTestButton.setText(testMovieLabel());
+        if (youtubeTestButton != null) youtubeTestButton.setText(testYoutubeLabel());
     }
 
     private void cycleBadge() {
@@ -200,6 +476,16 @@ public final class SettingsActivity extends Activity {
     private String badgeStateName() {
         return getString(AppPrefs.badgeEnabled(this)
                 ? R.string.badge_on : R.string.badge_off);
+    }
+
+    /** Installed version name for the footer; unknown only if package lookup fails. */
+    private String appVersionName() {
+        try {
+            String name = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            return name == null ? "?" : name;
+        } catch (Exception ignored) {
+            return "?";
+        }
     }
 
     private void refreshTargetButtons() {
@@ -219,6 +505,60 @@ public final class SettingsActivity extends Activity {
         getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE).edit()
                 .putString(AppPrefs.TARGET_YOUTUBE, next).apply();
         refreshTargetButtons();
+        refreshTestButtons();
+    }
+
+    /** One focusable toggle button per known provider; D-pad navigates the list. */
+    private void buildWhitelistRows() {
+        if (whitelistRows == null) return;
+        whitelistRows.removeAllViews();
+        for (String providerId : RecommendationTitleParser.PROVIDER_ID_ORDER) {
+            Button row = button("");
+            row.setTag(providerId);
+            row.setOnClickListener(v -> {
+                Object tag = v.getTag();
+                if (tag instanceof String) toggleWhitelisted((String) tag);
+            });
+            whitelistRows.addView(row, lp(-1, dp(58), 0, 0, 0, 8));
+        }
+        refreshWhitelistRows();
+    }
+
+    private void toggleWhitelisted(String providerId) {
+        Set<String> next = ProviderWhitelist.toggled(AppPrefs.whitelist(this), providerId);
+        AppPrefs.setWhitelist(this, next);
+        refreshWhitelistRows();
+    }
+
+    private void refreshWhitelistRows() {
+        Set<String> whitelist = null;
+        try {
+            whitelist = AppPrefs.whitelist(this);
+        } catch (RuntimeException prefsError) {
+            whitelist = ProviderWhitelist.parse(null);
+        }
+        if (whitelistSummary != null) {
+            whitelistSummary.setText(getString(R.string.whitelist_label,
+                    ProviderWhitelist.summary(whitelist)));
+        }
+        if (whitelistRows == null) return;
+        for (int index = 0; index < whitelistRows.getChildCount(); index++) {
+            View child = whitelistRows.getChildAt(index);
+            if (!(child instanceof Button) || !(child.getTag() instanceof String)) continue;
+            String providerId = (String) child.getTag();
+            boolean on = ProviderWhitelist.contains(whitelist, providerId);
+            ((Button) child).setText(getString(R.string.whitelist_toggle_label,
+                    RecommendationTitleParser.providerDisplayName(providerId),
+                    getString(on ? R.string.whitelist_on : R.string.whitelist_off)));
+        }
+    }
+
+    private String whitelistSummaryText() {
+        try {
+            return ProviderWhitelist.summary(AppPrefs.whitelist(this));
+        } catch (RuntimeException prefsError) {
+            return getString(R.string.whitelist_none);
+        }
     }
 
     private String currentYoutubeTargetName() {
@@ -227,8 +567,10 @@ public final class SettingsActivity extends Activity {
     }
 
     private String currentMoviesTargetName() {
-        return getString(AppPrefs.MOVIES_STREMIO.equals(AppPrefs.moviesTarget(this))
-                ? R.string.target_stremio : R.string.target_nuvio);
+        String target = AppPrefs.moviesTarget(this);
+        if (AppPrefs.MOVIES_STREMIO.equals(target)) return getString(R.string.target_stremio);
+        if (AppPrefs.MOVIES_WUPLAY.equals(target)) return getString(R.string.target_wuplay);
+        return getString(R.string.target_nuvio);
     }
 
     private void saveKey() {
@@ -271,8 +613,8 @@ public final class SettingsActivity extends Activity {
                     getString(R.string.status_key_missing)));
             status.setTextColor(Color.rgb(255, 209, 102));
         } else if (!enabled) {
-            status.setText(getString(R.string.status_line, getString(R.string.service_status_title),
-                    getString(R.string.status_disabled), ""));
+            status.setText(getString(R.string.status_line_plain, getString(R.string.service_status_title),
+                    getString(R.string.status_disabled)));
             status.setTextColor(Color.rgb(255, 209, 102));
         } else {
             status.setText(getString(R.string.status_line, getString(R.string.service_status_title),
@@ -347,6 +689,8 @@ public final class SettingsActivity extends Activity {
         b.setAllCaps(false);
         b.setFocusable(true);
         b.setMinHeight(dp(54));
+        b.setBackgroundResource(R.drawable.tv_button_background);
+        b.setTextColor(getResources().getColorStateList(R.color.tv_button_text, null));
         return b;
     }
 

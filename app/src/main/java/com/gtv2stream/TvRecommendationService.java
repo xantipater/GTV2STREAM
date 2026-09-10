@@ -35,6 +35,10 @@ public final class TvRecommendationService extends AccessibilityService {
     private static final long TITLE_EARLY_RETRY_DELAY_MS = 250L;
     private static final long TITLE_FINAL_RETRY_DELAY_MS = 600L;
     private static final long DUPLICATE_WINDOW_MS = 2000L;
+    /** Freshness window for focused-card provider context (focus -> detail dispatch). */
+    private static final long FOCUSED_HERO_WINDOW_MS = 15000L;
+    /** Build identifier, logged on connect so a test run can name its own APK. */
+    private static final String BUILD_STAMP = "shangchi-1";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "gtv2stream-worker");
@@ -47,9 +51,37 @@ public final class TvRecommendationService extends AccessibilityService {
     private RecommendationTitleParser.Source focusedHeroSource =
             RecommendationTitleParser.Source.NONE;
     private long focusedHeroCapturedAt;
+    /**
+     * The last real card payload, captured either when a card was focused or
+     * from a click event that actually carried one. This is the primary source
+     * for both the stock-YouTube divert and the click fallback, because the
+     * ambient panel poll in {@link #focusedHeroSource} reads every text node in
+     * every window and is not trustworthy enough to be first. Never written by
+     * the panel poll.
+     */
+    private RecommendationTitleParser.Source lastCardSource =
+            RecommendationTitleParser.Source.NONE;
+    private long lastCardCapturedAt;
+    /** Throttle for the focused-YouTube-card kill, so scrolling cannot spam the framework. */
+    private static final long STOCK_YOUTUBE_KILL_THROTTLE_MS = 2000L;
+    private long lastStockYoutubeKillAt;
+    /** Window in which stock YouTube resurfacing may be answered with one re-assert. */
+    private static final long DIVERT_REASSERT_WINDOW_MS = 6000L;
+    private String lastDivertTitle = "";
+    private long lastDivertAt;
+    private int divertReassertsLeft;
     private String lastDispatchedTitle = "";
     private boolean lastDispatchedYoutube;
     private long lastDispatchedAt;
+    /**
+     * Last whitelisted bypass, kept apart from the dispatch bookkeeping above
+     * so the whitelist check can stay first without a bypass ever suppressing
+     * an explicit provider-carrying click. Only the immediate providerless
+     * EntityActivity fallback for the same title is suppressed.
+     */
+    private String lastBypassedTitle = "";
+    private boolean lastBypassedYoutube;
+    private long lastBypassedAt;
 
     /**
      * Periodic connection heartbeat: Settings treats the service as Ready only
@@ -69,10 +101,14 @@ public final class TvRecommendationService extends AccessibilityService {
 
     @Override public void onServiceConnected() {
         heartbeat.run();
+        // Warm the installed-app label set on the worker so the first redirect
+        // never pays the PackageManager enumeration on the accessibility thread.
+        worker.execute(this::loadInstalledAppLabels);
         // A service rebind can occur while a launcher card is already focused,
         // in which case Android sends no new focus event for that card.
         scheduleHeroCapture(100L, 12);
-        Log.i(TAG, "Accessibility service connected for " + LAUNCHER_PACKAGE);
+        Log.i(TAG, "Accessibility service connected for " + LAUNCHER_PACKAGE
+                + " build=" + BUILD_STAMP);
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
@@ -82,16 +118,12 @@ public final class TvRecommendationService extends AccessibilityService {
         boolean launcherEvent = LAUNCHER_PACKAGE.contentEquals(event.getPackageName());
         if (!launcherEvent) {
             if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                    && STOCK_YOUTUBE_PACKAGE.contentEquals(event.getPackageName())
-                    && hasFreshFocusedHeroSource()) {
-                RecommendationTitleParser.Source source = focusedHeroSource;
-                clearFocusedHeroSource();
-                Log.i(TAG, "Stock YouTube opened after recommendation; redirecting cached title");
-                dispatchTitle(source.title, true);
-                return;
+                    && STOCK_YOUTUBE_PACKAGE.contentEquals(event.getPackageName())) {
+                divertStockYouTube();
             }
             return;
         }
+        logRawLauncherEvent(event);
         if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             handleLauncherClick(event);
         } else if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
@@ -110,26 +142,66 @@ public final class TvRecommendationService extends AccessibilityService {
     }
 
     private void handleLauncherFocus(AccessibilityEvent event) {
+        // Synchronous provider bridge: the focused card's event text,
+        // content description, or source-node description already carries the
+        // provider edge (e.g. "The Tomorrow War, requires Prime Video
+        // subscription, ..."). Cache a provider-bearing source immediately so
+        // the YouTube-only window poll below can never overwrite it.
+        RecommendationTitleParser.Source immediate =
+                RecommendationTitleParser.fromEventTextSource(event.getText());
+        if (immediate.isEmpty() || !immediate.hasProvider()) {
+            immediate = RecommendationTitleParser.fromDescriptionSource(
+                    toString(event.getContentDescription()));
+        }
+        if (isUsableYouTubeSource(immediate)) {
+            // The focused card's payload is the card the user is about to press,
+            // and it is the only source that survives this launcher's click
+            // events, which sometimes expose just the grid label of the card's
+            // container ("Column 3") and nothing else.
+            rememberCard(immediate);
+        }
         AccessibilityNodeInfo source = event.getSource();
         if (source != null) {
             try {
+                if (immediate.isEmpty() || !immediate.hasProvider()) {
+                    RecommendationTitleParser.Source nodeSource =
+                            RecommendationTitleParser.fromDescriptionSource(
+                                    toString(source.getContentDescription()));
+                    if (!nodeSource.isEmpty() && nodeSource.hasProvider()) {
+                        immediate = nodeSource;
+                    }
+                }
+                if (!immediate.isEmpty() && immediate.hasProvider()) {
+                    focusedHeroSource = immediate;
+                    focusedHeroCapturedAt = System.currentTimeMillis();
+                    Log.i(TAG, "Cached focused provider title: " + immediate.title
+                            + " (" + immediate.provider + ")");
+                    return;
+                }
                 android.graphics.Rect bounds = new android.graphics.Rect();
                 source.getBoundsInScreen(bounds);
                 scheduleFocusedHeroCapture(bounds);
             } finally {
                 source.recycle();
             }
+        } else if (!immediate.isEmpty() && immediate.hasProvider()) {
+            focusedHeroSource = immediate;
+            focusedHeroCapturedAt = System.currentTimeMillis();
+            Log.i(TAG, "Cached focused provider title: " + immediate.title
+                    + " (" + immediate.provider + ")");
         } else {
             clearFocusedHeroSource();
         }
     }
 
     private void scheduleFocusedHeroCapture(android.graphics.Rect bounds) {
-        // Recommendation cards on this 1080p launcher occupy the lower hero row.
-        if (bounds.top < 650 || bounds.top > 950 || bounds.height() < 100) {
-            clearFocusedHeroSource();
-            return;
-        }
+        // This used to reject any focused card outside a hardcoded hero band
+        // (top 650..950) and clear the cache for it. That band is wrong for real
+        // YouTube cards on this launcher, which were measured at
+        // [116,591][508,828]: focusing one wiped the very title the divert needs.
+        // The panel poll below is already narrow (it only yields a title when a
+        // visible "YouTube" marker exists in the panel), so the poll is now
+        // always scheduled and a valid cache is never cleared on focus alone.
         scheduleHeroCapture(100L, 12);
     }
 
@@ -138,15 +210,28 @@ public final class TvRecommendationService extends AccessibilityService {
         pendingHeroCapture = () -> {
             pendingHeroCapture = null;
             RecommendationTitleParser.Source source = sourceFromWindowPayloads();
-            focusedHeroSource = source;
-            focusedHeroCapturedAt = source.isEmpty() ? 0 : System.currentTimeMillis();
-            if (!source.isEmpty()) {
-                Log.i(TAG, "Cached focused YouTube title: " + source.title);
-            } else if (attemptsRemaining > 1) {
-                // Hero metadata arrives after the focus event. Poll briefly so a
-                // click made as soon as it becomes visible still has the title.
-                scheduleHeroCapture(100L, attemptsRemaining - 1);
+            if (source.isEmpty()) {
+                // Never clear a title that is still fresh. On this launcher the
+                // bottom "Top picks for you" row exposes only "Column N" on both
+                // focus and click, so the hero panel is the only place the card's
+                // title ever appears, and it is read on a timer. Clearing it on an
+                // empty poll is what left the divert with nothing to use, which is
+                // how a click ended up back in stock YouTube.
+                if (!hasFreshFocusedHeroSource()) {
+                    focusedHeroSource = source;
+                    focusedHeroCapturedAt = 0;
+                }
+                if (attemptsRemaining > 1) {
+                    // Hero metadata arrives after the focus event. Poll briefly so a
+                    // click made as soon as it becomes visible still has the title.
+                    scheduleHeroCapture(100L, attemptsRemaining - 1);
+                }
+                return;
             }
+            focusedHeroSource = source;
+            focusedHeroCapturedAt = System.currentTimeMillis();
+            Log.i(TAG, "Cached focused YouTube title: " + source.title);
+            noteYoutubeCardFocused();
         };
         handler.postDelayed(pendingHeroCapture, delayMs);
     }
@@ -158,7 +243,199 @@ public final class TvRecommendationService extends AccessibilityService {
 
     private boolean hasFreshFocusedHeroSource() {
         return !focusedHeroSource.isEmpty()
-                && System.currentTimeMillis() - focusedHeroCapturedAt < 15000L;
+                && System.currentTimeMillis() - focusedHeroCapturedAt < FOCUSED_HERO_WINDOW_MS;
+    }
+
+    /** Records the card payload as the primary divert source. */
+    private void rememberCard(RecommendationTitleParser.Source source) {
+        if (source == null || source.isEmpty()) return;
+        lastCardSource = source;
+        lastCardCapturedAt = System.currentTimeMillis();
+        if (isUsableYouTubeSource(source)) noteYoutubeCardFocused();
+    }
+
+    /**
+     * Drops a backgrounded stock YouTube as soon as we know the focused card is
+     * a YouTube video.
+     *
+     * <p>This is the only moment the kill can work. Once the card is clicked the
+     * launcher has already brought its own copy of stock YouTube forward, and
+     * {@code killBackgroundProcesses} cannot touch a foreground app, so a
+     * post-click kill is a no-op. Killing it while it is still backgrounded makes
+     * the launcher's own launch a cold start, which cannot out-race the redirect,
+     * and leaves nothing resident to take the foreground back afterwards.
+     * Throttled so scrolling across the row does not hammer the framework.
+     */
+    private void noteYoutubeCardFocused() {
+        long now = System.currentTimeMillis();
+        if (now - lastStockYoutubeKillAt < STOCK_YOUTUBE_KILL_THROTTLE_MS) return;
+        lastStockYoutubeKillAt = now;
+        worker.execute(() -> dropStockYouTube("focused YouTube card"));
+    }
+
+    private void clearLastCardSource() {
+        lastCardSource = RecommendationTitleParser.Source.NONE;
+        lastCardCapturedAt = 0L;
+    }
+
+    /** True when a cached source is a YouTube-marked title we can search for. */
+    private static boolean isUsableYouTubeSource(RecommendationTitleParser.Source source) {
+        return source != null && !source.isEmpty() && source.youtube;
+    }
+
+    /**
+     * Diverts the stock-YouTube window change to the configured YouTube target.
+     *
+     * <p>The launcher fires stock YouTube itself with an explicit,
+     * package-targeted intent, so this divert is the only guaranteed redirect,
+     * and it is only possible when a card title was captured before the click
+     * landed. The clicked card wins over the ambient panel. When neither is
+     * usable the miss is logged rather than guessed at: searching YouTube for
+     * an unrelated video is worse than leaving stock YouTube on screen.
+     */
+    private void divertStockYouTube() {
+        if (reassertLastDivert()) return;
+        long now = System.currentTimeMillis();
+        boolean clickedUsable = isUsableYouTubeSource(lastCardSource);
+        boolean heroUsable = isUsableYouTubeSource(focusedHeroSource);
+        DivertPolicy.Choice choice = DivertPolicy.choose(
+                lastCardCapturedAt, clickedUsable,
+                focusedHeroCapturedAt, heroUsable, now);
+        if (choice == DivertPolicy.Choice.CLICKED_CARD) {
+            RecommendationTitleParser.Source source = lastCardSource;
+            long age = now - lastCardCapturedAt;
+            clearLastCardSource();
+            noteDiverted(source.title);
+            Log.i(TAG, "Stock YouTube divert: clicked card (age " + age + "ms) "
+                    + source.title);
+            dispatchTitle(source.title, true, source.provider);
+            return;
+        }
+        if (choice == DivertPolicy.Choice.HERO_PANEL) {
+            RecommendationTitleParser.Source source = focusedHeroSource;
+            long age = now - focusedHeroCapturedAt;
+            clearFocusedHeroSource();
+            noteDiverted(source.title);
+            Log.i(TAG, "Stock YouTube divert: ambient panel (age " + age + "ms) "
+                    + source.title);
+            dispatchTitle(source.title, true, source.provider);
+            return;
+        }
+        Log.w(TAG, "Divert missed: no card title cached (clicked="
+                + describeCache(lastCardSource, lastCardCapturedAt, now)
+                + ", hero=" + describeCache(focusedHeroSource, focusedHeroCapturedAt, now) + ")");
+    }
+
+    /** Records a successful divert so a resurfacing stock YouTube can be answered once. */
+    private void noteDiverted(String title) {
+        lastDivertTitle = title == null ? "" : title;
+        lastDivertAt = System.currentTimeMillis();
+        divertReassertsLeft = 1;
+    }
+
+    /**
+     * The launcher's own stock YouTube launch can still land after the redirect,
+     * especially when it was already warm. When its window comes forward again
+     * straight after a divert, re-assert the same search once: the title is
+     * already known from that divert, so nothing is guessed and a manual YouTube
+     * open long afterwards is never hijacked.
+     */
+    private boolean reassertLastDivert() {
+        if (divertReassertsLeft <= 0 || lastDivertTitle.isEmpty()) return false;
+        long now = System.currentTimeMillis();
+        if (now - lastDivertAt > DIVERT_REASSERT_WINDOW_MS) return false;
+        divertReassertsLeft--;
+        lastDivertAt = now;
+        final String title = lastDivertTitle;
+        Log.i(TAG, "Stock YouTube resurfaced after the redirect; re-asserting the search");
+        worker.execute(() -> {
+            if (YouTubeLauncher.open(this, title)) RedirectBadge.show(this);
+        });
+        return true;
+    }
+
+    /** Compact cache state, for diagnosing a divert miss. */
+    private static String describeCache(RecommendationTitleParser.Source source,
+            long capturedAt, long now) {
+        if (source == null || source.isEmpty()) return "empty";
+        return "\"" + source.title + "\" age=" + (now - capturedAt)
+                + "ms youtube=" + source.youtube;
+    }
+
+    /**
+     * Diagnostic: the raw truth of every click/focus event the launcher sends,
+     * so a live test can prove what a card click actually carries instead of
+     * inferring it from downstream behaviour. The event's source node is read
+     * but never recycled here: the click handler runs moments later on the same
+     * dispatch and reads that same node.
+     */
+    private void logRawLauncherEvent(AccessibilityEvent event) {
+        int type = event.getEventType();
+        if (type != AccessibilityEvent.TYPE_VIEW_CLICKED
+                && type != AccessibilityEvent.TYPE_VIEW_FOCUSED
+                && type != AccessibilityEvent.TYPE_VIEW_SELECTED) {
+            return;
+        }
+        StringBuilder line = new StringBuilder("RAW ").append(eventTypeName(type))
+                .append(" class=").append(toString(event.getClassName()))
+                .append(" text=").append(clip(joinEventText(event.getText())))
+                .append(" desc=").append(clip(toString(event.getContentDescription())));
+        try {
+            AccessibilityNodeInfo source = event.getSource();
+            if (source != null) {
+                android.graphics.Rect bounds = new android.graphics.Rect();
+                source.getBoundsInScreen(bounds);
+                line.append(" node[class=").append(toString(source.getClassName()))
+                        .append(" id=").append(source.getViewIdResourceName())
+                        .append(" text=").append(clip(toString(source.getText())))
+                        .append(" desc=").append(clip(toString(source.getContentDescription())))
+                        .append(" bounds=").append(bounds.toShortString())
+                        .append(']');
+            }
+        } catch (RuntimeException rawError) {
+            line.append(" node[unreadable ").append(rawError.getMessage()).append(']');
+        }
+        Log.i(TAG, line.toString());
+    }
+
+    private static String eventTypeName(int type) {
+        switch (type) {
+            case AccessibilityEvent.TYPE_VIEW_CLICKED: return "CLICKED";
+            case AccessibilityEvent.TYPE_VIEW_FOCUSED: return "FOCUSED";
+            case AccessibilityEvent.TYPE_VIEW_SELECTED: return "SELECTED";
+            case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED: return "WINDOW_STATE";
+            default: return String.valueOf(type);
+        }
+    }
+
+    private static String joinEventText(List<CharSequence> values) {
+        if (values == null || values.isEmpty()) return "";
+        StringBuilder joined = new StringBuilder();
+        for (CharSequence value : values) {
+            if (joined.length() > 0) joined.append(" | ");
+            joined.append(value);
+        }
+        return joined.toString();
+    }
+
+    private static String clip(String value) {
+        if (value == null) return "";
+        return value.length() > 160 ? value.substring(0, 160) + "…" : value;
+    }
+
+    /**
+     * Carries the cached focused-card provider into an authoritative detail
+     * title. Returns the provider only when the cache is fresh, non-YouTube,
+     * provider-bearing, and title-matched; otherwise {@code ""} so detail
+     * dispatches stay providerless exactly as before.
+     */
+    private String focusedProviderForDetail(String detailTitle) {
+        if (detailTitle == null || detailTitle.isEmpty()) return "";
+        if (!hasFreshFocusedHeroSource()) return "";
+        return DispatchPolicy.focusedProviderForDetail(
+                focusedHeroSource.title, focusedHeroSource.youtube, focusedHeroSource.provider,
+                focusedHeroCapturedAt, detailTitle,
+                System.currentTimeMillis(), FOCUSED_HERO_WINDOW_MS);
     }
 
     private void handleLauncherClick(AccessibilityEvent event) {
@@ -176,16 +453,45 @@ public final class TvRecommendationService extends AccessibilityService {
             source = sourceFromClickedNode(event);
         }
         if (!source.isEmpty()) {
-            dispatchTitle(source.title, source.youtube);
+            // This payload came from the click event or the clicked node, so it
+            // describes the card the user actually pressed: remember it as the
+            // primary source for a stock-YouTube divert before any panel cache
+            // can be consulted.
+            rememberCard(source);
+            dispatchTitle(source.title, source.youtube, source.provider);
         } else {
             logRejectedPayload(event);
+            // Detail-action fix (live Shang-Chi no-op): a click on an entity
+            // detail action carries no direct payload while the detail tree
+            // already exposes the exact title row. Consult it first; only when
+            // absent do the existing window/hero fallbacks run.
+            String detailTitle = titleFromDetailRoot();
+            if (!detailTitle.isEmpty()) {
+                String detailProvider = focusedProviderForDetail(detailTitle);
+                if (!detailProvider.isEmpty()) clearFocusedHeroSource();
+                dispatchTitle(detailTitle, false, detailProvider);
+                return;
+            }
+            // The click carried nothing usable, but the card being pressed was
+            // captured when it gained focus. Prefer that over the ambient panel,
+            // whose scan reads launcher chrome and once searched YouTube for
+            // "Column 3" instead of the card's video.
+            if (isUsableYouTubeSource(lastCardSource)
+                    && DivertPolicy.isFresh(lastCardCapturedAt,
+                            System.currentTimeMillis(), FOCUSED_HERO_WINDOW_MS)) {
+                RecommendationTitleParser.Source cached = lastCardSource;
+                clearLastCardSource();
+                Log.i(TAG, "Click payload unusable; using the focused card title");
+                dispatchTitle(cached.title, cached.youtube, cached.provider);
+                return;
+            }
             source = sourceFromWindowPayloads();
             if (source.isEmpty() && hasFreshFocusedHeroSource()) {
                 source = focusedHeroSource;
             }
             if (!source.isEmpty()) {
                 clearFocusedHeroSource();
-                dispatchTitle(source.title, source.youtube);
+                dispatchTitle(source.title, source.youtube, source.provider);
                 return;
             }
             scheduleTitleRetry();
@@ -304,9 +610,12 @@ public final class TvRecommendationService extends AccessibilityService {
         cancelTitleRetry();
         String title = titleFromDetailRoot();
         if (!title.isEmpty()) {
-            // Entity detail windows carry no provider marker, so they always follow
-            // the film/series path; YouTube routing is click-payload driven.
-            dispatchTitle(title, false);
+            // Entity detail windows carry no provider marker themselves; the
+            // focused-card provider (cached at focus time) is carried in only
+            // on a fresh title match. YouTube routing stays click-payload driven.
+            String detailProvider = focusedProviderForDetail(title);
+            if (!detailProvider.isEmpty()) clearFocusedHeroSource();
+            dispatchTitle(title, false, detailProvider);
         } else {
             scheduleTitleRetry();
         }
@@ -323,7 +632,9 @@ public final class TvRecommendationService extends AccessibilityService {
             pendingTitleRetry = null;
             String title = titleFromDetailRoot();
             if (!title.isEmpty()) {
-                dispatchTitle(title, false);
+                String detailProvider = focusedProviderForDetail(title);
+                if (!detailProvider.isEmpty()) clearFocusedHeroSource();
+                dispatchTitle(title, false, detailProvider);
             } else if (allowFinalRetry) {
                 scheduleTitleRetry(
                         TITLE_FINAL_RETRY_DELAY_MS - TITLE_EARLY_RETRY_DELAY_MS, false);
@@ -358,9 +669,13 @@ public final class TvRecommendationService extends AccessibilityService {
     }
 
     private String titleFromDetailRow(AccessibilityNodeInfo node) {
-        String title = RecommendationTitleParser.fromDirectText(toString(node.getText()));
+        // Authoritative detail title row: parse with the dedicated bounded
+        // detail method (same guards, 15-word cap) so long exact titles such
+        // as the 8-word Shang-Chi title survive. General fail-closed limits
+        // elsewhere are untouched.
+        String title = RecommendationTitleParser.fromDetailTitle(toString(node.getText()));
         if (!title.isEmpty()) return title;
-        title = RecommendationTitleParser.fromDescription(toString(node.getContentDescription()));
+        title = RecommendationTitleParser.fromDetailTitle(toString(node.getContentDescription()));
         if (!title.isEmpty()) return title;
         for (int index = 0; index < node.getChildCount(); index++) {
             AccessibilityNodeInfo child = node.getChild(index);
@@ -375,21 +690,79 @@ public final class TvRecommendationService extends AccessibilityService {
         return "";
     }
 
+    /**
+     * Drops the stock YouTube background process. Runs on the worker, never on
+     * the accessibility callback thread. {@code KILL_BACKGROUND_PROCESSES} is a
+     * normal permission and cannot touch a foreground app, so this is safe at
+     * any point: it only ever removes a backgrounded stock YouTube, which is
+     * exactly the resident copy that can otherwise win the foreground back after
+     * a redirect, or that makes the launcher's own launch fast enough to beat it.
+     */
+    private void dropStockYouTube(String phase) {
+        try {
+            android.app.ActivityManager manager =
+                    (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            if (manager == null) return;
+            manager.killBackgroundProcesses(STOCK_YOUTUBE_PACKAGE);
+            Log.i(TAG, "Dropped stock YouTube background process (" + phase + ")");
+        } catch (RuntimeException killError) {
+            Log.w(TAG, "Could not drop stock YouTube (" + phase + "): "
+                    + killError.getMessage());
+        }
+    }
+
+    /** Routes a resolved title to the configured film/series destination. */
+    private boolean openMoviesTarget(String target, TitleMatch match) {
+        if (AppPrefs.MOVIES_STREMIO.equals(target)) return StremioLauncher.open(this, match);
+        if (AppPrefs.MOVIES_WUPLAY.equals(target)) return WuPlayLauncher.open(this, match);
+        return NuvioLauncher.open(this, match);
+    }
+
+    /** The deep link the selected destination will be given, for the log line only. */
+    private static String moviesTargetUri(String target, TitleMatch match) {
+        if (AppPrefs.MOVIES_STREMIO.equals(target)) return TitleResultHelper.stremioUri(match);
+        if (AppPrefs.MOVIES_WUPLAY.equals(target)) return TitleResultHelper.wuplayUri(match);
+        return TitleResultHelper.nuvioUri(match);
+    }
+
     private void dispatchTitle(String title, boolean youtube) {
+        dispatchTitle(title, youtube, "");
+    }
+
+    private void dispatchTitle(String title, boolean youtube, String provider) {
         String cleaned = youtube
                 ? RecommendationTitleParser.youtubeSource(title).title
                 : RecommendationTitleParser.fromDirectText(title);
         if (cleaned.isEmpty() && !youtube) {
             cleaned = RecommendationTitleParser.fromDescription(title);
         }
+        if (cleaned.isEmpty() && !youtube) {
+            // Authoritative detail-row titles allow up to 15 words with the
+            // same guards; re-validate here so an exact detail title (e.g. the
+            // 8-word Shang-Chi title) survives dispatch. Inputs are already
+            // parsed titles, so general fail-closed limits stay intact.
+            cleaned = RecommendationTitleParser.fromDetailTitle(title);
+        }
         if (cleaned.isEmpty()) return;
-        if (matchesInstalledAppLabel(cleaned)) {
-            // Launcher app tiles read like single-word titles; fail closed.
-            Log.i(TAG, "Rejected launcher app tile label: " + cleaned);
+        long now = System.currentTimeMillis();
+        if (isWhitelistedProvider(provider)) {
+            // Whitelisted providers keep normal Google TV behaviour: no redirect,
+            // no badge, no TMDB lookup. The bypass is recorded apart from the
+            // dispatch bookkeeping below so the immediate providerless
+            // EntityActivity fallback for the same title is suppressed without
+            // ever blocking an explicit provider-carrying click.
+            Log.i(TAG, "Whitelisted provider bypass: " + provider + " for " + cleaned);
+            lastBypassedTitle = cleaned;
+            lastBypassedYoutube = youtube;
+            lastBypassedAt = now;
             return;
         }
-
-        long now = System.currentTimeMillis();
+        if (DispatchPolicy.shouldSuppressProviderlessFallback(
+                lastBypassedTitle, lastBypassedYoutube, lastBypassedAt,
+                cleaned, youtube, provider, now, DUPLICATE_WINDOW_MS)) {
+            Log.i(TAG, "Suppressed providerless fallback after whitelisted bypass: " + cleaned);
+            return;
+        }
         if (TitleResultHelper.normalizedTitleMatches(lastDispatchedTitle, cleaned)
                 && youtube == lastDispatchedYoutube
                 && now - lastDispatchedAt < DUPLICATE_WINDOW_MS) return;
@@ -403,42 +776,62 @@ public final class TvRecommendationService extends AccessibilityService {
     }
 
     private void resolveAndOpen(String title, boolean youtube) {
+        // Launcher app tiles read like single-word titles; fail closed. This
+        // runs on the worker (not the accessibility callback) and the label
+        // set is warmed on connect, so the first redirect never blocks event
+        // delivery on a PackageManager enumeration.
+        if (matchesInstalledAppLabel(title)) {
+            Log.i(TAG, "Rejected launcher app tile label: " + title);
+            return;
+        }
         if (youtube) {
             // YouTube cards search by title; no TMDB lookup or key is needed.
+            // The launcher starts its own copy of stock YouTube for these cards,
+            // so drop any resident instance on both sides of the redirect: the
+            // one before it is still backgrounded and forces the launcher's own
+            // launch to cold-start, and the one after it is the launcher's copy,
+            // now backgrounded by this redirect and no longer able to take the
+            // foreground back.
+            dropStockYouTube("before redirect");
             if (YouTubeLauncher.open(this, title)) {
+                dropStockYouTube("after redirect");
                 RedirectBadge.show(this);
             }
             return;
         }
-
-        String key = getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE)
-                .getString(AppPrefs.TMDB_KEY, "").trim();
+        // One prefs read per click: the TMDB key and the film/series target come
+        // from the same snapshot instead of two separate getSharedPreferences calls.
+        android.content.SharedPreferences prefs = getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE);
+        String key = prefs.getString(AppPrefs.TMDB_KEY, "").trim();
         if (key.length() < 10) {
             Log.w(TAG, "TMDB key missing or too short; configure GTV2STREAM first");
             notifyUser(R.string.status_key_missing);
             return;
         }
         try {
-            boolean preferStremio = AppPrefs.MOVIES_STREMIO.equals(AppPrefs.moviesTarget(this));
+            String moviesTarget = LaunchPolicy.moviesTarget(
+                    prefs.getString(AppPrefs.TARGET_MOVIES, AppPrefs.MOVIES_NUVIO));
             // Repeated selections reuse the recent match instead of re-querying TMDB.
+            // Recent misses fail closed fast without a second network lookup.
+            if (MatchCache.isMiss(title)) {
+                Log.i(TAG, "Cached TMDB miss reused for: " + title);
+                return;
+            }
             TitleMatch match = MatchCache.get(title);
             if (match == null) {
                 match = new TmdbClient(key).searchBest(title);
                 if (match == null) {
                     Log.i(TAG, "No TMDB movie or series match for: " + title);
+                    MatchCache.putMiss(title);
                     return;
                 }
                 MatchCache.put(title, match);
             } else {
                 Log.i(TAG, "Cached TMDB match reused for: " + title);
             }
-            boolean opened = preferStremio
-                    ? StremioLauncher.open(this, match)
-                    : NuvioLauncher.open(this, match);
+            boolean opened = openMoviesTarget(moviesTarget, match);
             Log.i(TAG, "TMDB match: " + match.title + " -> "
-                    + (preferStremio
-                            ? TitleResultHelper.stremioUri(match)
-                            : TitleResultHelper.nuvioUri(match)));
+                    + moviesTargetUri(moviesTarget, match));
             if (opened) {
                 RedirectBadge.show(this);
             }
@@ -579,24 +972,56 @@ public final class TvRecommendationService extends AccessibilityService {
         handler.post(() -> Toast.makeText(this, message, Toast.LENGTH_LONG).show());
     }
 
+    /**
+     * True when the card's canonical provider identity is whitelisted. Matching is
+     * by exact provider identity from a recognised provider edge or watch action;
+     * the title itself never participates. Entity-window retries carry a provider
+     * only via the fresh title-matched focus bridge, otherwise "" which bypasses
+     * nothing.
+     */
+    private boolean isWhitelistedProvider(String provider) {
+        String id = RecommendationTitleParser.canonicalWhitelistId(provider);
+        if (id.isEmpty()) return false;
+        try {
+            return ProviderWhitelist.contains(AppPrefs.whitelist(this), id);
+        } catch (RuntimeException prefsError) {
+            return false;
+        }
+    }
     /** True when the title exactly matches an installed app's display label. */
     private boolean matchesInstalledAppLabel(String title) {
+        Set<String> labels = installedAppLabels;
+        if (labels == null) {
+            // Worker-side fallback when a dispatch beats the connect-time warm:
+            // load synchronously here (still off the accessibility thread, since
+            // every caller runs on the worker) so the check is never skipped.
+            labels = loadInstalledAppLabels();
+        }
+        return AppLabelPolicy.matches(labels, title);
+    }
+
+    /**
+     * Loads and publishes the installed-app label set. Runs on the worker via
+     * {@link #onServiceConnected} warmup or lazily above; never on the
+     * accessibility callback thread. Matching semantics are unchanged.
+     */
+    private Set<String> loadInstalledAppLabels() {
         try {
             Set<String> labels = installedAppLabels;
-            if (labels == null) {
-                labels = new HashSet<>();
-                PackageManager packageManager = getPackageManager();
-                List<android.content.pm.ApplicationInfo> apps =
-                        packageManager.getInstalledApplications(0);
-                for (android.content.pm.ApplicationInfo app : apps) {
-                    String label = String.valueOf(packageManager.getApplicationLabel(app)).trim();
-                    if (!label.isEmpty()) labels.add(label.toLowerCase(java.util.Locale.US));
-                }
-                installedAppLabels = labels;
+            if (labels != null) return labels;
+            Set<String> loaded = new HashSet<>();
+            PackageManager packageManager = getPackageManager();
+            List<android.content.pm.ApplicationInfo> apps =
+                    packageManager.getInstalledApplications(0);
+            java.util.List<String> raw = new java.util.ArrayList<>(apps.size());
+            for (android.content.pm.ApplicationInfo app : apps) {
+                raw.add(String.valueOf(packageManager.getApplicationLabel(app)));
             }
-            return labels.contains(title.toLowerCase(java.util.Locale.US));
+            loaded.addAll(AppLabelPolicy.normalizeAll(raw));
+            installedAppLabels = loaded;
+            return loaded;
         } catch (RuntimeException labelError) {
-            return false;
+            return null;
         }
     }
 

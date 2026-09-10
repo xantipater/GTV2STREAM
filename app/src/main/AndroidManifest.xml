@@ -1,7 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required so the user-confirmed PackageInstaller session can proceed after the
+         user taps "Download & install" and accepts the system install prompt.
+         The app never installs silently; the system installer always asks first. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Owner-requested, for the YouTube redirect: a redirect that leaves the
+         launcher's own stock YouTube copy resident can lose the foreground back
+         to that warm task. KILL_BACKGROUND_PROCESSES is a normal permission and
+         can never touch a foreground app, so it only ever drops a backgrounded
+         stock YouTube after the redirect has taken over. -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -15,6 +25,13 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="stremio" />
         </intent>
+        <!-- WuPlay's own scheme; without this the handler is invisible to
+             queryIntentActivities on Android 11+. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="wuplay" />
+        </intent>
+        <package android:name="app.wuplay.androidtv" />
         <package android:name="org.smarttube.stable" />
         <package android:name="org.smarttube.beta" />
         <package android:name="com.teamsmart.videomanager.tv" />
@@ -44,6 +61,14 @@
             android:name=".HelpActivity"
             android:exported="false"
             android:label="@string/help_title" />
+
+        <receiver
+            android:name=".UpdateInstallReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.gtv2stream.UPDATE_INSTALL_STATUS" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".TvRecommendationService"

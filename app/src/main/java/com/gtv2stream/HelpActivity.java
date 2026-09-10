@@ -6,6 +6,7 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.Window;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -55,7 +56,23 @@ public final class HelpActivity extends Activity {
         root.addView(body(getString(R.string.help_finish), 0, 18));
         root.addView(trouble(getString(R.string.help_trouble)));
 
+        Button back = button(getString(R.string.back_to_settings));
+        back.setOnClickListener(v -> finish());
+        root.addView(back, lp(-1, dp(58), 0, 18, 0, 0));
+
         setContentView(scroll);
+    }
+
+    private Button button(String label) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setTextSize(17);
+        b.setAllCaps(false);
+        b.setFocusable(true);
+        b.setMinHeight(dp(54));
+        b.setBackgroundResource(R.drawable.tv_button_background);
+        b.setTextColor(getResources().getColorStateList(R.color.tv_button_text, null));
+        return b;
     }
 
     private TextView body(String value, int left, int bottom) {

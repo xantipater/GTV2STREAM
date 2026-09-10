@@ -24,36 +24,56 @@ public final class NuvioLauncher {
             Toast.makeText(service, R.string.missing_match_id, Toast.LENGTH_SHORT).show();
             return false;
         }
-        LaunchSupport.Target target = LaunchSupport.resolveHandler(service, uri, PREFERRED_PACKAGES, false);
+        String cacheKey = LaunchPolicy.cacheKey(AppPrefs.MOVIES_NUVIO, uri);
+        LaunchSupport.Target target = LaunchSupport.cachedTarget(cacheKey);
         if (target == null) {
-            Log.w(TAG, "No Nuvio URI handler resolved for " + uri);
-            Toast.makeText(service, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show();
-            return false;
+            target = LaunchSupport.resolveHandler(service, uri, PREFERRED_PACKAGES, false);
+            if (target == null) {
+                Log.w(TAG, "No Nuvio URI handler resolved for " + uri);
+                Toast.makeText(service, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show();
+                return false;
+            }
+            LaunchSupport.cacheTarget(cacheKey, target);
         }
         boolean opened = LaunchSupport.launchFresh(
-                service, uri, target, null, "Fresh Nuvio");
+                service, uri, target, null, "Fresh Nuvio", cacheKey);
         if (!opened) {
             Toast.makeText(service, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show();
         }
         return opened;
     }
 
+    /** Callbacks for the settings test button; invoked on a worker thread. */
+    public interface TestCallback {
+        void onMissingTarget();
+        void onResult(boolean opened);
+    }
+
     /** The settings test follows the same fresh-task behavior as service launches. */
     public static boolean openTest(Context context) {
+        return openTest(context, null);
+    }
+
+    /** Callback variant: posts no UI itself; results go to {@code callback}. */
+    public static boolean openTest(Context context, TestCallback callback) {
         if (context == null) return false;
         final Context applicationContext = context.getApplicationContext();
         final LaunchSupport.Target target = resolveTestTarget(applicationContext);
         if (target == null) {
             Log.w(TAG, "No Nuvio URI handler resolved for " + TEST_URI);
-            Toast.makeText(context, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show();
+            if (callback != null) callback.onMissingTarget();
+            else Toast.makeText(context, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show();
             return false;
         }
         Thread launchThread = new Thread(() -> {
             boolean opened = LaunchSupport.launchFresh(
                     applicationContext, TEST_URI, target, null, "Fresh Nuvio");
-            if (!opened) {
-                Toast.makeText(applicationContext, R.string.status_nuvio_missing,
-                        Toast.LENGTH_LONG).show();
+            if (callback != null) {
+                callback.onResult(opened);
+            } else if (!opened) {
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> Toast.makeText(
+                        applicationContext, R.string.status_nuvio_missing,
+                        Toast.LENGTH_LONG).show());
             }
         }, "gtv2stream-nuvio-test");
         launchThread.start();

@@ -8,42 +8,51 @@ import android.widget.Toast;
 import java.util.Arrays;
 import java.util.List;
 
-/** Resolves a Stremio deep-link handler and performs an explicit fresh-task launch. */
-public final class StremioLauncher {
+/**
+ * Resolves WuPlay's deep-link handler and performs an explicit fresh-task launch.
+ *
+ * <p>WuPlay ({@code app.wuplay.androidtv}) is IMDb-backed like Stremio:
+ * {@code wuplay://movie/<imdbId>} and {@code wuplay://series/<imdbId>}. Verified
+ * live on the test TV against WuPlay 0.9.0-beta: both forms resolve to
+ * {@code app.wuplay.androidtv/.MainActivity}, and the scheme is declared in
+ * WuPlay's own manifest. The flat shape (no {@code /detail}) is WuPlay's own,
+ * not a Stremio fork, so it gets its own resolver and its own cache key.
+ */
+public final class WuPlayLauncher {
     private static final String TAG = "GTV2STREAM";
-    public static final String TEST_URI = "stremio:///detail/movie/tt0371746";
-    /**
-     * Strict Stremio packages: Nuvio also registers the stremio:// scheme (it is a
-     * Stremio TV fork), so resolution must never fall back to an arbitrary handler.
-     */
-    private static final List<String> STREMIO_PACKAGES = Arrays.asList(
-            "com.stremio.one", "io.stremio.app", "com.stremio");
+    public static final String TEST_URI = "wuplay://movie/tt0371746";
 
-    private StremioLauncher() { }
+    /**
+     * Strict WuPlay packages. The scheme is exclusive to WuPlay in practice, but
+     * resolution still never falls back to an arbitrary handler for the scheme.
+     */
+    private static final List<String> WUPLAY_PACKAGES = Arrays.asList(
+            "app.wuplay.androidtv");
+
+    private WuPlayLauncher() { }
 
     /** Called from the service worker after title resolution. */
     public static boolean open(AccessibilityService service, TitleMatch match) {
-        String uri = TitleResultHelper.stremioUri(match);
+        String uri = TitleResultHelper.wuplayUri(match);
         if (uri == null) {
             Toast.makeText(service, R.string.missing_match_id, Toast.LENGTH_SHORT).show();
             return false;
         }
-        String cacheKey = LaunchPolicy.cacheKey(AppPrefs.MOVIES_STREMIO, uri);
+        String cacheKey = LaunchPolicy.cacheKey(AppPrefs.MOVIES_WUPLAY, uri);
         LaunchSupport.Target target = LaunchSupport.cachedTarget(cacheKey);
         if (target == null) {
-            target = LaunchSupport.resolveHandler(
-                    service, uri, STREMIO_PACKAGES, true);
+            target = LaunchSupport.resolveHandler(service, uri, WUPLAY_PACKAGES, true);
             if (target == null) {
-                Log.w(TAG, "No Stremio URI handler resolved for " + uri);
-                Toast.makeText(service, R.string.status_stremio_missing, Toast.LENGTH_LONG).show();
+                Log.w(TAG, "No WuPlay URI handler resolved for " + uri);
+                Toast.makeText(service, R.string.status_wuplay_missing, Toast.LENGTH_LONG).show();
                 return false;
             }
             LaunchSupport.cacheTarget(cacheKey, target);
         }
         boolean opened = LaunchSupport.launchFresh(
-                service, uri, target, target.packageName, "Fresh Stremio", cacheKey);
+                service, uri, target, target.packageName, "Fresh WuPlay", cacheKey);
         if (!opened) {
-            Toast.makeText(service, R.string.status_stremio_missing, Toast.LENGTH_LONG).show();
+            Toast.makeText(service, R.string.status_wuplay_missing, Toast.LENGTH_LONG).show();
         }
         return opened;
     }
@@ -64,24 +73,24 @@ public final class StremioLauncher {
         if (context == null) return false;
         final Context applicationContext = context.getApplicationContext();
         final LaunchSupport.Target target = LaunchSupport.resolveHandler(
-                applicationContext, TEST_URI, STREMIO_PACKAGES, true);
+                applicationContext, TEST_URI, WUPLAY_PACKAGES, true);
         if (target == null) {
-            Log.w(TAG, "No Stremio URI handler resolved for " + TEST_URI);
+            Log.w(TAG, "No WuPlay URI handler resolved for " + TEST_URI);
             if (callback != null) callback.onMissingTarget();
-            else Toast.makeText(context, R.string.status_stremio_missing, Toast.LENGTH_LONG).show();
+            else Toast.makeText(context, R.string.status_wuplay_missing, Toast.LENGTH_LONG).show();
             return false;
         }
         Thread launchThread = new Thread(() -> {
             boolean opened = LaunchSupport.launchFresh(
-                    applicationContext, TEST_URI, target, target.packageName, "Fresh Stremio");
+                    applicationContext, TEST_URI, target, target.packageName, "Fresh WuPlay");
             if (callback != null) {
                 callback.onResult(opened);
             } else if (!opened) {
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> Toast.makeText(
-                        applicationContext, R.string.status_stremio_missing,
+                        applicationContext, R.string.status_wuplay_missing,
                         Toast.LENGTH_LONG).show());
             }
-        }, "gtv2stream-stremio-test");
+        }, "gtv2stream-wuplay-test");
         launchThread.start();
         return true;
     }
