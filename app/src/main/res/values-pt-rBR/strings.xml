@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GTV2STREAM</string>
+    <string name="app_subtitle">Recomendações do Google TV nos seus apps</string>
+    <string name="service_label">Redirecionamento de recomendações GTV2STREAM</string>
+    <string name="service_description">Lê recomendações selecionadas do launcher do Google TV e abre os títulos correspondentes no app escolhido (Nuvio ou Stremio), e cartões do YouTube como busca de título no SmartTube.</string>
+    <string name="tmdb_key_label">Chave de API TMDB</string>
+    <string name="tmdb_key_hint">Cole sua própria chave de API TMDB v3</string>
+    <string name="save_key">Salvar chave TMDB</string>
+    <string name="open_accessibility">Abrir configurações de acessibilidade</string>
+    <string name="enable_overlay">Permitir exibição sobre outros apps (badge de redirecionamento)</string>
+    <string name="open_setup_help">Ajuda de configuração (instalação via ADB)</string>
+    <string name="target_movies_label">Destino de TV e filmes: %1$s</string>
+    <string name="target_nuvio">Nuvio</string>
+    <string name="target_stremio">Stremio</string>
+    <string name="test_movie">Testar link de TV e filmes</string>
+    <string name="test_youtube">Testar busca no YouTube</string>
+    <string name="test_link_opened">Abrindo link de teste</string>
+    <string name="test_youtube_opened">Abrindo busca de teste no YouTube</string>
+    <string name="service_status_title">Serviço de acessibilidade</string>
+    <string name="status_line">%1$s: %2$s — %3$s</string>
+    <string name="status_enabled">Ativado</string>
+    <string name="status_disabled">Não ativado</string>
+    <string name="status_key_missing">Chave TMDB não configurada</string>
+    <string name="status_ready">Pronto</string>
+    <string name="status_service_not_connected">Ativado, mas a TV não conectou o serviço — permita inicialização automática para o GTV2STREAM nas informações do app da TV ou reinicie a TV</string>
+    <string name="status_service_blocked">Bloqueado pela proteção de inicialização automática da TV; permita que o GTV2STREAM inicie automaticamente</string>
+    <string name="open_app_info">Abrir informações do app (permitir inicialização automática)</string>
+    <string name="badge_toggle_label">Mostrar badge de redirecionamento: %1$s</string>
+    <string name="badge_on">Ligado</string>
+    <string name="badge_off">Desligado</string>
+    <string name="status_nuvio_missing">Nenhum manipulador Nuvio foi encontrado para o link de teste</string>
+    <string name="status_stremio_missing">Stremio não encontrado; instale-o ou escolha Nuvio como destino</string>
+    <string name="status_smarttube_missing">SmartTube não encontrado; instale o SmartTube para usar redirecionamentos do YouTube</string>
+    <string name="key_saved">Chave TMDB salva localmente</string>
+    <string name="invalid_key">Digite uma chave TMDB válida (pelo menos 10 caracteres)</string>
+    <string name="key_rejected">TMDB rejeitou esta chave; atualize-a no GTV2STREAM</string>
+    <string name="missing_match_id">O resultado do TMDB não possui identificador IMDb</string>
+    <string name="settings_note">Títulos correspondentes abrem no app de TV e filmes selecionado (Nuvio ou Stremio), e cartões do YouTube abrem como busca de título no SmartTube. Um pequeno badge confirma brevemente cada redirecionamento quando este app tem permissão para exibir sobre outros apps. Sua chave TMDB é armazenada nas preferências locais privadas deste app e enviada apenas ao TMDB para busca de títulos.</string>
+
+    <string name="help_title">Ajuda de configuração (instalação via ADB)</string>
+    <string name="help_intro">Use isto quando sua TV bloquear a ativação do serviço de acessibilidade após uma instalação normal do APK. Seu PC Windows e a TV devem estar na mesma rede local, e o Nuvio (ou o app de destino escolhido) já deve estar instalado na TV. O guia completo está em INSTALL_ADB.md no repositório do projeto.</string>
+    <string name="help_need">1. Baixe o Android SDK Platform-Tools para Windows no seu PC, extraia o ZIP e coloque o APK do GTV2STREAM ao lado do adb.exe. Obtenha sua própria chave gratuita TMDB v3 em themoviedb.org/settings/api.</string>
+    <string name="help_dev">2. Na TV: Configurações > Sistema > Sobre, selecione a compilação do Android TV OS sete vezes, depois em Opções de desenvolvedor ative a depuração USB e também a depuração de rede ou depuração sem fio. Anote o endereço IP da TV.</string>
+    <string name="help_connect">3. No Prompt de Comando aberto dentro da pasta platform-tools, conecte-se à TV:</string>
+    <string name="help_connect_pair">Se a TV precisar de pareamento, abra Opções de desenvolvedor > Depuração sem fio > Parear dispositivo com código de pareamento, mantenha essa tela visível e execute:</string>
+    <string name="help_connect_pair_2">Digite o código de pareamento mostrado na TV e depois conecte usando a porta de conexão separada exibida na tela principal de Depuração sem fio:</string>
+    <string name="help_install">4. Instale o APK (Sucesso confirma que funcionou):</string>
+    <string name="help_autostart">TVs TCL podem bloquear o serviço de iniciar mesmo após mostrar Ativado (proteção de inicialização automática do fabricante). Abra Configurações do Android > Apps > GTV2STREAM e permita Inicialização automática, ou execute isto no mesmo Prompt de Comando:</string>
+    <string name="help_configure">5. Configure o GTV2STREAM: insira sua chave TMDB v3 e selecione Salvar chave TMDB. Escolha seu destino de TV e filmes (Nuvio ou Stremio). Redirecionamentos do YouTube usam o SmartTube. Abra Configurações de acessibilidade, ative o redirecionamento de recomendações do GTV2STREAM e confirme que o status mostra Ativado — Pronto. Se o status indicar que a TV está bloqueando o serviço, siga o passo de inicialização automática acima. Se você usar múltiplos perfis Nuvio, ative Lembrar último perfil no Nuvio.</string>
+    <string name="help_trouble">Solução de problemas: "adb" não é reconhecido — execute cmd de dentro da pasta platform-tools para que o adb.exe esteja presente. Conexão recusada na porta 5555 — use o método de pareamento de depuração sem fio. Pareamento bem-sucedido mas conexão falhou — pareamento e conexão usam portas diferentes. Serviço de acessibilidade ainda indisponível — ADB ajuda mas não é garantido em todas as compilações de TV. Instalação falhou — confirme o nome do APK ao lado do adb.exe e mantenha a TV conectada.</string>
+    <string name="help_finish">6. Após a configuração você pode desligar as opções de depuração; o GTV2STREAM não precisa de PC ou conexão ADB para uso diário.</string>
+</resources>
