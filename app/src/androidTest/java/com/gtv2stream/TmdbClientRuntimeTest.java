@@ -23,17 +23,27 @@ public class TmdbClientRuntimeTest {
     private static final String EXTERNAL = "{\"imdb_id\":\"tt0087182\"}";
 
     @Test public void uniqueFirstPageRequestsItsExternalIdentifier() throws Exception {
-        ScriptedTransport network = new ScriptedTransport(page(1, 1, 1, movie("Dune", 1984, 841)), EXTERNAL);
+        ScriptedTransport network = new ScriptedTransport(1, page(1, 1, 1, movie("Dune", 1984, 841)), EXTERNAL);
         TitleMatch match = new TmdbClient(KEY, network).searchBest("Dune");
         assertNotNull(match);
         assertEquals(841, match.tmdbId);
         assertEquals("tt0087182", match.imdbId);
         assertEquals(Arrays.asList("/3/search/multi", "/3/movie/841/external_ids"), network.paths());
-        assertTrue(network.requests.get(0).endsWith("&query=Dune&include_adult=false&page=1"));
+        assertTrue(network.requests.get(0).contains("&query=Dune&include_adult=false"));
+    }
+
+    @Test public void queryTextIsEncodedWithoutChangingItsTitleIdentity() throws Exception {
+        ScriptedTransport network = new ScriptedTransport(1,
+                page(1, 1, 1, movie("Wall-E & Friends", 1984, 841)), EXTERNAL);
+        TitleMatch match = new TmdbClient(KEY, network).searchBest("Wall-E & Friends");
+        assertNotNull(match);
+        assertEquals("Wall-E & Friends", match.title);
+        assertTrue(network.requests.get(0).contains("&query=Wall-E+%26+Friends&include_adult=false"));
+        assertEquals(Arrays.asList("/3/search/multi", "/3/movie/841/external_ids"), network.paths());
     }
 
     @Test public void uniqueExactTitleOnSecondPageIsFoundBeforeExternalLookup() throws Exception {
-        ScriptedTransport network = new ScriptedTransport(
+        ScriptedTransport network = new ScriptedTransport(2,
                 page(1, 2, 3, movie("Dune: Part Two", 2024, 693134)),
                 page(2, 2, 3, movie("Dune", 1984, 841), movie("Alien", 1979, 348)), EXTERNAL);
         TitleMatch match = new TmdbClient(KEY, network).searchBest("Dune");
@@ -45,15 +55,15 @@ public class TmdbClientRuntimeTest {
     }
 
     @Test public void secondPageRemakePreventsAnyExternalLookup() throws Exception {
-        ScriptedTransport network = new ScriptedTransport(
+        ScriptedTransport network = new ScriptedTransport(2,
                 page(1, 2, 2, movie("Dune", 2021, 438631)),
                 page(2, 2, 2, movie("Dune", 1984, 841)));
         assertNull(new TmdbClient(KEY, network).searchBest("Dune"));
-        assertEquals(2, network.requests.size());
+        assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi"), network.paths());
     }
 
     @Test public void explicitYearSelectsAcrossAllPagesAndIsNotPartOfSearchText() throws Exception {
-        ScriptedTransport network = new ScriptedTransport(
+        ScriptedTransport network = new ScriptedTransport(2,
                 page(1, 2, 2, movie("Dune", 2021, 438631)),
                 page(2, 2, 2, movie("Dune", 1984, 841)), EXTERNAL);
         TitleMatch match = new TmdbClient(KEY, network).searchBest("Dune (1984)");
@@ -65,23 +75,23 @@ public class TmdbClientRuntimeTest {
     }
 
     @Test public void duplicateIdentityAcrossPagesIsHarmlessButMovieAndSeriesAreDistinct() throws Exception {
-        ScriptedTransport duplicate = new ScriptedTransport(
+        ScriptedTransport duplicate = new ScriptedTransport(2,
                 page(1, 2, 2, movie("Dune", 1984, 841)),
                 page(2, 2, 2, movie("Dune", 1984, 841)), EXTERNAL);
         assertNotNull(new TmdbClient(KEY, duplicate).searchBest("Dune"));
         JSONObject series = new JSONObject().put("media_type", "tv").put("id", 841)
                 .put("name", "Dune").put("first_air_date", "1984-01-01");
-        ScriptedTransport ambiguous = new ScriptedTransport(
+        ScriptedTransport ambiguous = new ScriptedTransport(2,
                 page(1, 2, 2, movie("Dune", 1984, 841)), page(2, 2, 2, series));
         assertNull(new TmdbClient(KEY, ambiguous).searchBest("Dune (1984)"));
-        assertEquals(2, ambiguous.requests.size());
+        assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi"), ambiguous.paths());
     }
 
     @Test public void overFivePagesFailsImmediatelyAndFiveCompletePagesCanMatch() throws Exception {
-        ScriptedTransport overLimit = new ScriptedTransport(page(1, 6, 6, movie("Dune", 1984, 841)));
+        ScriptedTransport overLimit = new ScriptedTransport(1, page(1, 6, 6, movie("Dune", 1984, 841)));
         assertNull(new TmdbClient(KEY, overLimit).searchBest("Dune"));
-        assertEquals(1, overLimit.requests.size());
-        ScriptedTransport bounded = new ScriptedTransport(
+        assertEquals(Arrays.asList("/3/search/multi"), overLimit.paths());
+        ScriptedTransport bounded = new ScriptedTransport(5,
                 page(1, 5, 5, movie("Alien", 1979, 1)),
                 page(2, 5, 5, movie("Aliens", 1986, 2)),
                 page(3, 5, 5, movie("Jaws", 1975, 3)),
@@ -119,9 +129,9 @@ public class TmdbClientRuntimeTest {
                 page(2, 2, 3, movie("Alien", 1979, 348), movie("Aliens", 1986, 679),
                         movie("Jaws", 1975, 578)),
                 "{\"page\":2,\"total_pages\":2,\"total_results\":3}")) {
-            ScriptedTransport network = new ScriptedTransport(first, later);
+            ScriptedTransport network = new ScriptedTransport(2, first, later);
             assertNull(new TmdbClient(KEY, network).searchBest("Dune"));
-            assertEquals(2, network.requests.size());
+            assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi"), network.paths());
         }
     }
 
@@ -139,7 +149,7 @@ public class TmdbClientRuntimeTest {
             assertRejectedAfterFirstPage(response.toString());
         }
         JSONObject person = new JSONObject().put("media_type", "person").put("id", 123).put("name", "Dune");
-        ScriptedTransport network = new ScriptedTransport(
+        ScriptedTransport network = new ScriptedTransport(1,
                 page(1, 1, 2, movie("Dune", 1984, 841), person), EXTERNAL);
         assertNotNull(new TmdbClient(KEY, network).searchBest("Dune"));
     }
@@ -152,14 +162,15 @@ public class TmdbClientRuntimeTest {
                     page(2, 2, 2, movie("Alien", 1979, 348)), EXTERNAL
             };
             responses[failingRequest] = expected;
-            ScriptedTransport network = new ScriptedTransport(responses);
+            ScriptedTransport network = new ScriptedTransport(2, responses);
             try {
                 new TmdbClient(KEY, network).searchBest("Dune");
                 fail("Incomplete transport must fail the lookup");
             } catch (IOException actual) {
                 assertSame(expected, actual);
             }
-            assertEquals(failingRequest + 1, network.requests.size());
+            assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi",
+                    "/3/movie/841/external_ids").subList(0, failingRequest + 1), network.paths());
         }
     }
 
@@ -170,29 +181,34 @@ public class TmdbClientRuntimeTest {
                     page(2, 2, 2, movie("Alien", 1979, 348)), EXTERNAL
             };
             responses[failingRequest] = "{";
-            ScriptedTransport network = new ScriptedTransport(responses);
+            ScriptedTransport network = new ScriptedTransport(2, responses);
             try {
                 new TmdbClient(KEY, network).searchBest("Dune");
                 fail("Malformed JSON must fail the lookup");
             } catch (IOException expected) {
                 assertTrue(expected.getCause() instanceof org.json.JSONException);
             }
-            assertEquals(failingRequest + 1, network.requests.size());
+            assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi",
+                    "/3/movie/841/external_ids").subList(0, failingRequest + 1), network.paths());
         }
     }
 
     @Test public void noResultsAndInvalidExternalIdentifierDoNotMatch() throws Exception {
         assertRejectedAfterFirstPage(page(1, 0, 0));
-        ScriptedTransport invalidId = new ScriptedTransport(
-                page(1, 1, 1, movie("Dune", 1984, 841)), "{\"imdb_id\":null}");
-        assertNull(new TmdbClient(KEY, invalidId).searchBest("Dune"));
-        assertEquals(2, invalidId.requests.size());
+        assertRejectedAfterFirstPage(page(1, 1, 0));
+        for (String external : Arrays.asList("{\"imdb_id\":null}", "{\"imdb_id\":\"\"}",
+                "{\"imdb_id\":\"not-imdb\"}", "{}")) {
+            ScriptedTransport invalidId = new ScriptedTransport(1,
+                    page(1, 1, 1, movie("Dune", 1984, 841)), external);
+            assertNull(new TmdbClient(KEY, invalidId).searchBest("Dune"));
+            assertEquals(Arrays.asList("/3/search/multi", "/3/movie/841/external_ids"), invalidId.paths());
+        }
     }
 
     private static void assertRejectedAfterFirstPage(String body) throws Exception {
-        ScriptedTransport network = new ScriptedTransport(body);
+        ScriptedTransport network = new ScriptedTransport(1, body);
         assertNull(new TmdbClient(KEY, network).searchBest("Dune"));
-        assertEquals(1, network.requests.size());
+        assertEquals(Arrays.asList("/3/search/multi"), network.paths());
     }
 
     private static JSONObject movie(String title, int year, long id) throws Exception {
@@ -210,15 +226,37 @@ public class TmdbClientRuntimeTest {
     private static final class ScriptedTransport implements TmdbClient.Transport {
         final List<String> requests = new ArrayList<>();
         final Object[] responses;
-        ScriptedTransport(Object... responses) { this.responses = responses; }
+        final int searchPages;
+        ScriptedTransport(int searchPages, Object... responses) {
+            this.searchPages = searchPages;
+            this.responses = responses;
+        }
 
         @Override public String get(String address) throws IOException {
             int index = requests.size();
             requests.add(address);
             if (index >= responses.length) throw new AssertionError("Unexpected network request");
+            URI request = URI.create(address);
+            // Bind each response to its intended endpoint. Otherwise a broken
+            // client can receive page-two JSON from an external_ids request,
+            // return null, and falsely satisfy a no-match assertion.
+            assertEquals(index < searchPages ? "/3/search/multi" : "/3/movie/841/external_ids",
+                    request.getPath());
+            if (index < searchPages) {
+                String requestedPage = parameter(request, "page");
+                if (index == 0 && requestedPage == null) requestedPage = "1";
+                assertEquals("Search page", Integer.toString(index + 1), requestedPage);
+            }
             Object response = responses[index];
             if (response instanceof IOException) throw (IOException) response;
             return (String) response;
+        }
+
+        private static String parameter(URI request, String name) {
+            for (String parameter : request.getRawQuery().split("&")) {
+                if (parameter.startsWith(name + "=")) return parameter.substring(name.length() + 1);
+            }
+            return null;
         }
 
         List<String> paths() {
