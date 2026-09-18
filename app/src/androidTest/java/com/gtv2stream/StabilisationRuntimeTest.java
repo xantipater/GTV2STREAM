@@ -3,6 +3,7 @@ package com.gtv2stream;
 import static org.junit.Assert.*;
 
 import android.app.Instrumentation;
+import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -12,6 +13,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInstaller;
 import android.graphics.Rect;
 import android.os.Looper;
+import android.os.Parcel;
+import android.widget.Button;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
@@ -150,7 +153,7 @@ public class StabilisationRuntimeTest {
         main(() -> {
             AccessibilityEvent e = event(AccessibilityEvent.TYPE_VIEW_CLICKED, HOME, "Dune (1984)");
             e.setContentDescription("Dune. Watch on Netflix");
-            try { service.onAccessibilityEvent(e); } finally { e.recycle(); }
+            try { deliverToService(e); } finally { e.recycle(); }
         });
         drain();
         assertEquals(Collections.singletonList("Dune (1984)"), service.lookedUp);
@@ -348,6 +351,109 @@ public class StabilisationRuntimeTest {
         } finally { bad.delete(); }
     }
 
+    @Test public void eventFixtureHasTheFrameworkDeliveryContract() {
+        AccessibilityEvent original = event(AccessibilityEvent.TYPE_VIEW_CLICKED, HOME,
+                "Dune (1984)", "Watch on Netflix");
+        original.setContentDescription("Dune. Watch on Netflix");
+        AccessibilityEvent delivered = sealedEventCopy(original);
+        try {
+            assertEquals(original.getEventType(), delivered.getEventType());
+            assertEquals(original.getPackageName(), delivered.getPackageName());
+            assertEquals(original.getClassName(), delivered.getClassName());
+            assertEquals(original.getContentDescription(), delivered.getContentDescription());
+            assertEquals(original.getText(), delivered.getText());
+            assertNull(delivered.getSource()); // no live accessibility connection in this fixture
+            try {
+                delivered.setPackageName("should.not.be.mutable");
+                fail("Framework-delivered events must be sealed");
+            } catch (IllegalStateException expected) { }
+        } finally {
+            delivered.recycle();
+            original.recycle();
+        }
+    }
+
+    @Test public void settingsRestoresRetryButtonAfterPersistedInstallerFailure() throws Exception {
+        // An uncommitted real session exercises pending UI without installing an APK.
+        PackageInstaller installer = context.getPackageManager().getPackageInstaller();
+        PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        params.setAppPackageName(context.getPackageName());
+        int session = installer.createSession(params);
+        Activity activity = null;
+        try {
+            prefs().edit().putLong("update_check_at", System.currentTimeMillis())
+                    .putString("update_version", "9.0.0")
+                    .putString("update_url", "https://github.com/xantipater/GTV2STREAM/releases/tag/v9.0.0")
+                    .putString("update_apk_url", "https://github.com/xantipater/GTV2STREAM/releases/download/v9.0.0/test.apk")
+                    .putString(AppPrefs.UPDATE_PROMPTED_VERSION, "9.0.0").commit();
+            assertTrue(UpdateInstallState.begin(context, session, "9.0.0"));
+            activity = instrumentation.startActivitySync(new Intent(context, SettingsActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            final Activity settings = activity;
+            Field buttonField = SettingsActivity.class.getDeclaredField("downloadUpdateButton");
+            buttonField.setAccessible(true);
+            Button button = (Button) buttonField.get(settings);
+            Method refresh = SettingsActivity.class.getDeclaredMethod("refreshInstallStatus");
+            refresh.setAccessible(true);
+            main(() -> {
+                assertFalse(button.isEnabled());
+                assertEquals(context.getString(R.string.update_confirm_install), button.getText().toString());
+            });
+            assertTrue(UpdateInstallState.record(context, session, PackageInstaller.STATUS_FAILURE_ABORTED));
+            main(() -> {
+                try { refresh.invoke(settings); }
+                catch (Exception error) { throw new AssertionError(error); }
+                assertTrue(button.isEnabled());
+                assertEquals(context.getString(R.string.download_update, "9.0.0"), button.getText().toString());
+            });
+        } finally {
+            if (activity != null) {
+                final Activity settings = activity;
+                main(settings::finish);
+                instrumentation.waitForIdleSync();
+            }
+            installer.abandonSession(session);
+        }
+    }
+
+    private void deliverToService(AccessibilityEvent original) {
+        AccessibilityEvent delivered = sealedEventCopy(original);
+        try { service.onAccessibilityEvent(delivered); }
+        finally { delivered.recycle(); }
+    }
+
+    /**
+     * Android seals events before delivering them to an accessibility service.
+     * Synthetic obtain() events are writable and getSource() rejects them.
+     *
+     * The record-free Parcel format in the API 26 and 34 AOSP implementations
+     * starts with the event sealed flag and ends with the record sealed flag,
+     * then a zero record count. Keep all payload serialization in the framework;
+     * change only those two flags. Assert the layout and delivery contract so a
+     * platform format change fails the fixture, not silently the routing tests.
+     * This avoids hidden-API reflection or relaxing emulator platform checks.
+     * It is test-only; no live source node or launcher binding is claimed.
+     */
+    private static AccessibilityEvent sealedEventCopy(AccessibilityEvent original) {
+        assertEquals("Fixture supports record-free events only", 0, original.getRecordCount());
+        Parcel parcel = Parcel.obtain();
+        try {
+            original.writeToParcel(parcel, 0);
+            int recordFlag = parcel.dataSize() - 2 * Integer.BYTES;
+            assertTrue(recordFlag > 0);
+            parcel.setDataPosition(0);
+            assertEquals("Expected writable event flag", 0, parcel.readInt());
+            parcel.setDataPosition(recordFlag);
+            assertEquals("Expected writable record flag", 0, parcel.readInt());
+            assertEquals("Expected no appended records", 0, parcel.readInt());
+            parcel.setDataPosition(0); parcel.writeInt(1);
+            parcel.setDataPosition(recordFlag); parcel.writeInt(1);
+            parcel.setDataPosition(0);
+            return AccessibilityEvent.CREATOR.createFromParcel(parcel);
+        } finally { parcel.recycle(); }
+    }
+
     private SharedPreferences prefs() { return context.getSharedPreferences(AppPrefs.PREFS, Context.MODE_PRIVATE); }
     private void whitelist(String ids) { prefs().edit().putString(AppPrefs.WHITELIST_PROVIDERS, ids).commit(); }
     private void blockFirst() { service.blockFirst = true; }
@@ -360,13 +466,13 @@ public class StabilisationRuntimeTest {
         main(() -> {
             AccessibilityEvent e = event(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, pkg);
             e.setClassName(className);
-            try { service.onAccessibilityEvent(e); } finally { e.recycle(); }
+            try { deliverToService(e); } finally { e.recycle(); }
         });
     }
     private void deliver(int type, String pkg, String... values) {
         main(() -> {
             AccessibilityEvent e = event(type, pkg, values);
-            try { service.onAccessibilityEvent(e); } finally { e.recycle(); }
+            try { deliverToService(e); } finally { e.recycle(); }
         });
     }
     private static AccessibilityEvent event(int type, String pkg, String... values) {
