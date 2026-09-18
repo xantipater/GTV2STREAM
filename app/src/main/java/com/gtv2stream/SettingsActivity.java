@@ -353,11 +353,16 @@ public final class SettingsActivity extends Activity {
         if (result == UpdateInstallState.NONE) return;
         if (result == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
             setUpdateStatus(getString(R.string.update_confirm_install));
-            if (downloadUpdateButton != null) downloadUpdateButton.setEnabled(false);
+            if (downloadUpdateButton != null) {
+                downloadUpdateButton.setEnabled(false);
                 downloadUpdateButton.setText(R.string.update_confirm_install);
+            }
             return;
         }
-        if (downloadUpdateButton != null) downloadUpdateButton.setEnabled(true);
+        // A persisted result may arrive after the original download listener
+        // was detached. Restore the label and click action as well as enabling
+        // the button, rather than leaving a stale confirmation/cancel action.
+        resetDownloadButton();
         if (result == android.content.pm.PackageInstaller.STATUS_SUCCESS) {
             setUpdateStatus(getString(R.string.update_installed));
         } else if (result == android.content.pm.PackageInstaller.STATUS_FAILURE_ABORTED) {
