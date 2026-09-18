@@ -1,0 +1,37 @@
+# Temporary implementation bootstrap; removed before the implementation PR is ready.
+# Read-only: no credentials, commits, installations or releases are produced.
+name: Review inputs
+on:
+  push:
+    branches: ['fix/review-stabilisation']
+    paths: ['.github/workflows/review-bootstrap.yml']
+permissions:
+  contents: read
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-34'
+      - name: Package tracked source and compile-only Android API
+        run: |
+          mkdir -p /tmp/review-inputs
+          git archive --format=tar HEAD > /tmp/review-inputs/source.tar
+          git rev-parse HEAD > /tmp/review-inputs/commit.txt
+          git ls-tree -r HEAD > /tmp/review-inputs/tree.txt
+          cp "$ANDROID_HOME/platforms/android-34/android.jar" /tmp/review-inputs/android.jar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtv2stream-review-inputs
+          path: /tmp/review-inputs/*
+          retention-days: 1
+          if-no-files-found: error
