@@ -95,6 +95,75 @@ separate from the GitHub build and Android runtime jobs. Read the implementation
 PR and CI artifacts for final results and exact tested commits. No unrun command
 should be marked passed here.
 
+## Continuation: verified results on 18 September 2026
+
+Implementation head: `fa5186635dacf80877e7c45704e27ab5b0ba8085`.
+GitHub CI run: [35380165250](https://github.com/xantipater/GTV2STREAM/actions/runs/35380165250),
+completed successfully. Its PR merge checkout was
+`e054fa6e84bc967f358aab4fdcb99dcf8cc6ec68`, tree
+`f1ef91cf59b1a95fa661fdebec362c0dbee90ab7`. All 70 tracked files in the downloaded
+source snapshot were verified against their Git blob hashes and against the local
+working source. This record is a documentation-only follow-up to that tested code.
+
+| Check actually executed | Result |
+|---|---|
+| `:app:runHelperTests` | PASS, 511 assertions; includes 63 stabilisation checks. |
+| `:app:lintDebug`, `:app:lintRelease` | PASS, no errors; seven warnings in each report. |
+| `:app:assembleDebug`, `:app:assembleDebugAndroidTest` | PASS. |
+| `:app:assembleRelease`, `:app:verifyReleaseArchive` | PASS, real R8-shrunk unsigned APK accepted by production archive validation. |
+| `:app:connectedDebugAndroidTest`, API 26 | PASS, 27 tests, zero failures/errors/skips. |
+| `:app:connectedDebugAndroidTest`, API 34 | PASS, 27 tests, zero failures/errors/skips. |
+| Downloaded CI bytecode rerun locally | Helper suite PASS (511); standalone stabilisation checks PASS (63); real release-archive check PASS. |
+| `git diff --check` | PASS for the continuation changes. |
+
+The shrunk unsigned APK is **59,686 bytes**; SHA-256:
+`af9a7658b9a059fe24543c78b2d6c41d7554e4226c0ed72673558ca1d211a78d`.
+Its ZIP entries/CRCs were also checked locally. This is not a signed installable
+release or evidence of signing-key continuity. The standalone 63-check run repeats
+checks already included in the 511 total; it is not additional coverage.
+
+The seven lint warnings concern the existing target SDK, package-visibility usage,
+newer available build/test dependencies, and a redundant SDK guard. Scoped launcher
+queries are present. No lint baseline, disabled rule, or unrelated dependency
+migration was used to obtain the passing result.
+
+### What was corrected after the first PR run
+
+The earlier run `35370785031` was not successful: lint found a missing-braces /
+suspicious-indentation error in `SettingsActivity.refreshInstallStatus`, and 16
+of 25 runtime tests failed because their synthetic events were writable.
+Android delivers sealed events to accessibility services; calling `getSource()`
+on an unsealed test event throws before routing is exercised. The remaining tests
+were not evidence that those failing paths worked.
+
+The continuation:
+
+- Adds the missing null-guard braces and restores the update button's label and
+  action after a persisted installer failure, not just its enabled state.
+- Delivers sealed, record-free framework Parcel copies of synthetic events. The
+  test-only adapter checks the API 26/34 parcel layout and verifies payload
+  preservation, readable source access and rejected mutation. It does not relax
+  Android checks or change production routing to accommodate the fixtures.
+- Adds an actual SettingsActivity test using an uncommitted PackageInstaller
+  session: pending state disables the button, then a persisted cancellation
+  restores its retry label. No APK is installed by this test.
+- Retains the exact tracked source identity, actual compiled helper classes and
+  diagnostics as CI artifacts, without copying credentials or local settings.
+
+The runtime XML reports were inspected, not inferred from a green workflow badge.
+All 27 test cases ran on both API levels. They include normal redirects alongside
+app/edit rejection, sponsored rejection, whitelist/reassertion sequences, delayed
+A→B cancellation, policy changes during lookup, explicit-year propagation,
+main-thread failure feedback, node ownership, clipping, foreign-window rejection,
+package validation and persisted installer status.
+
+**Still unverified:** real Google TV binding/payloads, actual Nuvio/Stremio/WuPlay/
+SmartTube/Cobalt handling, physical TV UI and OEM backup behaviour, and a same-key
+signed N→N+1 self-update with process replacement. The cancellation/outcome tests
+use synthetic statuses and a live uncommitted session, not a completed install.
+An independent review by someone other than the implementation author is also
+still a release gate. No main/release merge or publication was performed.
+
 ## Physical-TV and signed-release gates (not completed by this implementation)
 
 1. On an Onn Android 14 device and the supported TCL, focus a YouTube card then
