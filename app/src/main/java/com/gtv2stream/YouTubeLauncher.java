@@ -34,7 +34,7 @@ public final class YouTubeLauncher {
     public static boolean open(AccessibilityService service, String title) {
         String uri = TitleResultHelper.youtubeSearchUri(title);
         if (uri == null) {
-            Log.w(TAG, "Empty YouTube search title; nothing to open");
+            Diagnostics.debug("Empty YouTube search title; nothing to open");
             return false;
         }
         boolean tizentube = YouTubeTarget.isTizenTube(AppPrefs.youtubeTarget(service));
@@ -46,7 +46,7 @@ public final class YouTubeLauncher {
         if (target == null) {
             target = resolveSmartTube(service, uri);
             if (target == null) {
-                Log.w(TAG, "SmartTube is not installed");
+                Diagnostics.debug("SmartTube is not installed");
                 showMissingTarget(service, false);
                 return false;
             }
@@ -71,7 +71,7 @@ public final class YouTubeLauncher {
      */
     private static boolean openCobalt(Context context, String uri) {
         if (!isCobaltInstalled(context)) {
-            Log.w(TAG, "TizenTube Cobalt is not installed");
+            Diagnostics.debug("TizenTube Cobalt is not installed");
             showMissingTarget(context, true);
             return false;
         }
@@ -91,7 +91,7 @@ public final class YouTubeLauncher {
         } catch (PackageManager.NameNotFoundException notInstalled) {
             return false;
         } catch (RuntimeException error) {
-            Log.w(TAG, "Cobalt install check failed: " + error.getMessage());
+            Diagnostics.debug("Cobalt install check failed: " + error.getMessage());
             return false;
         }
     }
@@ -148,13 +148,13 @@ public final class YouTubeLauncher {
         if (tizentube) {
             // No SmartTube fallback: only Cobalt itself satisfies the selection.
             if (!isCobaltInstalled(applicationContext)) {
-                Log.w(TAG, "TizenTube Cobalt is not installed");
+                Diagnostics.debug("TizenTube Cobalt is not installed");
                 if (callback != null) callback.onMissingTarget();
                 else Toast.makeText(context, R.string.status_tizentube_missing, Toast.LENGTH_LONG).show();
                 return false;
             }
         } else if (resolveSmartTube(applicationContext, uri) == null) {
-            Log.w(TAG, "SmartTube is not installed");
+            Diagnostics.debug("SmartTube is not installed");
             if (callback != null) callback.onMissingTarget();
             else Toast.makeText(context, R.string.status_smarttube_missing, Toast.LENGTH_LONG).show();
             return false;

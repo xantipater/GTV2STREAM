@@ -35,6 +35,9 @@ final class LauncherInteractionPolicy {
                 return false;
             }
             if (interaction.hasCard) editing = false;
+            // A new explicit selection supersedes all older work, including
+            // another valid recommendation (not only app tiles/edit controls).
+            if (clicked) invalidate();
             return true;
         }
 
@@ -67,6 +70,11 @@ final class LauncherInteractionPolicy {
                 || RecommendationTitleParser.fromDescriptionSource(nodeDescription).hasProvider();
         boolean ignore = blocks(primary, appLabels, card) || blocks(description, appLabels, card)
                 || blocks(nodeText, appLabels, card) || blocks(nodeDescription, appLabels, card);
+        if (eventText != null) {
+            for (CharSequence value : eventText) {
+                ignore |= RecommendationTitleParser.isRejectedPayload(string(value));
+            }
+        }
         boolean enterEdit = editEntry(primary) || editEntry(description)
                 || editEntry(nodeText) || editEntry(nodeDescription);
         boolean exitEdit = editExit(primary) || editExit(description)
@@ -90,7 +98,8 @@ final class LauncherInteractionPolicy {
     }
 
     private static boolean blocks(String value, Set<String> appLabels, boolean card) {
-        if (RecommendationTitleParser.isNonContentControl(value)) return true;
+        if (RecommendationTitleParser.isNonContentControl(value)
+                || RecommendationTitleParser.isRejectedPayload(value)) return true;
         if (card && RecommendationTitleParser.isProviderLoose(value)) return false;
         return AppLabelPolicy.matches(appLabels, value);
     }

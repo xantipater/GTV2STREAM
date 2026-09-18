@@ -21,7 +21,8 @@ public final class NuvioLauncher {
     public static boolean open(AccessibilityService service, TitleMatch match) {
         String uri = TitleResultHelper.nuvioUri(match);
         if (uri == null) {
-            Toast.makeText(service, R.string.missing_match_id, Toast.LENGTH_SHORT).show();
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    Toast.makeText(service, R.string.missing_match_id, Toast.LENGTH_SHORT).show());
             return false;
         }
         String cacheKey = LaunchPolicy.cacheKey(AppPrefs.MOVIES_NUVIO, uri);
@@ -29,8 +30,9 @@ public final class NuvioLauncher {
         if (target == null) {
             target = LaunchSupport.resolveHandler(service, uri, PREFERRED_PACKAGES, false);
             if (target == null) {
-                Log.w(TAG, "No Nuvio URI handler resolved for " + uri);
-                Toast.makeText(service, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show();
+                Diagnostics.debug("No Nuvio URI handler resolved for " + uri);
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    Toast.makeText(service, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show());
                 return false;
             }
             LaunchSupport.cacheTarget(cacheKey, target);
@@ -38,7 +40,8 @@ public final class NuvioLauncher {
         boolean opened = LaunchSupport.launchFresh(
                 service, uri, target, null, "Fresh Nuvio", cacheKey);
         if (!opened) {
-            Toast.makeText(service, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show();
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    Toast.makeText(service, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show());
         }
         return opened;
     }
@@ -60,7 +63,7 @@ public final class NuvioLauncher {
         final Context applicationContext = context.getApplicationContext();
         final LaunchSupport.Target target = resolveTestTarget(applicationContext);
         if (target == null) {
-            Log.w(TAG, "No Nuvio URI handler resolved for " + TEST_URI);
+            Diagnostics.debug("No Nuvio URI handler resolved for " + TEST_URI);
             if (callback != null) callback.onMissingTarget();
             else Toast.makeText(context, R.string.status_nuvio_missing, Toast.LENGTH_LONG).show();
             return false;
