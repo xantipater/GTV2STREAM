@@ -4,6 +4,25 @@ All notable changes to GTV2STREAM are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Launcher app tiles and controls are rejected before any cached recommendation
+  fallback. Returning to an app tile also cancels pending title retries and
+  redirects, addressing the MiX Xplorer false redirect reported in issue #16.
+- Declare scoped visibility for TV/mobile launcher activities on Android 11+
+  and check activity labels as well as application labels. This lets the
+  installed-app guard recognise third-party app tiles without requesting
+  `QUERY_ALL_PACKAGES`.
+- Long presses clear recommendation context and suspend ambient YouTube capture
+  during launcher editing. Move/rearrange controls cannot fall back to an old
+  video title (issue #15).
+
+### Validation still required
+- The issue #15/#16 Onn Android 14 interaction sequences require confirmation on
+  real hardware. Automated fixtures are synthetic boundaries, not captured
+  accessibility payloads from the reporting device.
+
 ## [1.2.0] - 2026-09-10
 
 ### Added
