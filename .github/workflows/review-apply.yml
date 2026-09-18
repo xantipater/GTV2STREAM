@@ -1,0 +1,73 @@
+# One-time transfer of locally validated, hash-pinned implementation edits.
+# This file and its inputs remove themselves from the completed branch.
+name: Apply validated stabilisation
+on:
+  push:
+    branches: ['fix/review-stabilisation']
+    paths: ['.github/workflows/review-apply.yml']
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.repository == 'xantipater/GTV2STREAM' && github.ref == 'refs/heads/fix/review-stabilisation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply exact validated source edits in reviewable commits
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor f9445fa1ddd69a5ec5eed59377f83706d782419d HEAD
+          git config user.name 'GTV2STREAM implementation'
+          git config user.email 'xantipater@users.noreply.github.com'
+          python3 - <<'PY'
+          import hashlib, json, lzma, pathlib, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          def blob(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          packed = b''.join(pathlib.Path(f'.github/review-edits.{i}').read_bytes() for i in range(4))
+          raw = lzma.decompress(packed)
+          assert hashlib.sha256(raw).hexdigest() == '7cfd7976e9d8bb45329aa12029888d8da22d1c1d22e19887be5e620d1ae8b8af', 'Transfer hash mismatch'
+          commits = json.loads(raw)
+          assert len(commits) == 4
+          for commit in commits:
+              paths = []
+              for change in commit['files']:
+                  p = pathlib.Path(change['path'])
+                  assert not p.is_absolute() and '..' not in p.parts and '.git' not in p.parts
+                  assert not p.is_symlink()
+                  old = p.read_bytes() if p.exists() else None
+                  assert (blob(old) if old is not None else None) == change['old'], f'Base mismatch: {p}'
+                  if change['new'] is None:
+                      p.unlink()
+                  else:
+                      lines = old.decode('utf-8').splitlines(keepends=True) if old is not None else []
+                      for start, end, replacement in reversed(change['ops']):
+                          assert 0 <= start <= end <= len(lines)
+                          lines[start:end] = replacement.splitlines(keepends=True)
+                      content = ''.join(lines).encode('utf-8')
+                      assert blob(content) == change['new'], f'Result mismatch: {p}'
+                      p.parent.mkdir(parents=True, exist_ok=True)
+                      p.write_bytes(content)
+                  paths.append(str(p))
+              git('add', '--', *paths)
+              git('diff', '--cached', '--check')
+              git('commit', '-m', commit['message'])
+              print(git('log', '-1', '--format=%H %s'))
+          PY
+          git rm .github/review-edits.{0,1,2,3} .github/workflows/review-apply.yml
+          git commit -m 'chore: remove temporary implementation transfer inputs'
+          git diff --check
+          test -z "$(git status --porcelain)"
+          test "$(git ls-remote origin refs/heads/fix/review-stabilisation | cut -f1)" = "$GITHUB_SHA"
+          git push origin HEAD:refs/heads/fix/review-stabilisation
+          git log -6 --format='%H %s' | tee /tmp/implementation-commits.txt
+          git rev-parse HEAD^{tree} >> /tmp/implementation-commits.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: implementation-commit-record
+          path: /tmp/implementation-commits.txt
+          retention-days: 7
