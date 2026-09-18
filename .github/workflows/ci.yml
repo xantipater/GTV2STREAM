@@ -50,14 +50,26 @@ jobs:
             app/build/outputs/apk/**/*.apk
             app/build/outputs/mapping/release/**
           if-no-files-found: error
+      - name: Preserve tested source identity
+        if: always()
+        run: |
+          mkdir -p build/verification
+          git rev-parse HEAD > build/verification/commit.txt
+          git rev-parse HEAD^{tree} > build/verification/tree.txt
+          git ls-tree -r HEAD > build/verification/blobs.txt
+          # Tracked source only: no .git directory, credentials, or local settings.
+          git archive --format=tar HEAD > build/verification/source.tar
       - name: Upload all lint and build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gtv2stream-build-reports
           path: |
+            build/verification/**
             app/build/reports/**
             app/build/outputs/logs/**
+            app/build/helper-test-classes/**
+            app/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/**
           if-no-files-found: ignore
 
   android-runtime:
