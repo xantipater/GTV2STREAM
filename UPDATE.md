@@ -29,9 +29,9 @@ No future release filename or signing compatibility is assumed here.
 
 1. Open **GTV2STREAM** on the TV.
 2. If a newer version exists, a prompt appears: **Update available: GTV2STREAM
-   1.2.0**, with three choices:
+   [new version]**, with three choices:
 
-   - **Download & install 1.2.0** — downloads the release APK and hands it to the
+   - **Download & install [new version]** — downloads the release APK and hands it to the
      Android installer.
    - **Open release page** — opens the GitHub release page in the TV browser so
      you can download it yourself.
@@ -107,10 +107,12 @@ are updating a TV that has no easy way to reach Android settings.
    your TMDB key:
 
    ```text
-   adb install -r GTV2STREAM-v1.2.0.apk
+   adb install -r "NEW_RELEASE.apk"
    ```
 
-   Wait for `Success`.
+   Replace `NEW_RELEASE.apk` with the exact filename you downloaded, then wait
+   for `Success`. For the small-APK recovery above, use the maintenance release
+   containing the fix when it is published; reinstalling v1.2.0 does not fix its updater.
 
 5. On TCL TVs, re-apply the vendor auto-start permission if the service does not
    reconnect on its own:
