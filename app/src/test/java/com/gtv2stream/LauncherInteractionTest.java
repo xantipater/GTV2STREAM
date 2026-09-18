@@ -112,8 +112,8 @@ public final class LauncherInteractionTest {
         appSession.showDetail();
         check(!appSession.isEditing(), "authoritative entity window ends editing"); assertions++;
         long current = appSession.ticket();
-        check(appSession.accept(video, true) && appSession.isCurrent(current),
-                "normal card events preserve the current lookup"); assertions++;
+        check(appSession.accept(video, true) && !appSession.isCurrent(current),
+                "a new explicit card selection supersedes the previous lookup"); assertions++;
         appSession.invalidate();
         check(!appSession.isCurrent(current), "service destruction invalidates pending launches"); assertions++;
 

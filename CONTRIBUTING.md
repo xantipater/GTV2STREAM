@@ -1,7 +1,7 @@
 # Contributing to GTV2STREAM
 
 Thanks for looking at the project! GTV2STREAM is a small Android TV app that
-turns Google TV launcher recommendations into fresh Nuvio launches. Any help
+routes selected Google TV recommendations to configured targets. Any help
 is welcome, but read this first so your PR doesn't bounce.
 
 ## Ground rules
@@ -16,6 +16,30 @@ is welcome, but read this first so your PR doesn't bounce.
 - **Target the debug flavor.** Development happens against the debug build
   (`com.nuviodebug.com` on-device is Nuvio's debug build). Don't submit
   release-signed builds or keystore files.
+
+## Current source baseline and validation
+
+Published `v1.2.0` resolves to `36a7022d…` on `release/1.2`; the default
+`main` branch has not yet integrated that release. Stabilisation builds on
+PR #19 (`f9445fa1…`), not on the older main implementation. Target changes at
+`release/1.2` and preserve the existing app/edit-control fix. Do not merge or
+release without maintainer approval.
+
+Run the actual helper suite and Android checks:
+
+```bash
+./gradlew :app:runHelperTests :app:lintDebug :app:lintRelease
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:verifyReleaseArchive
+./gradlew :app:connectedDebugAndroidTest
+```
+
+The last command needs an emulator/device (CI uses API 26 and 34). Test-only
+AndroidX dependencies are not application dependencies. Android runtime tests
+substitute network responses and target launches but exercise actual service
+orchestration and framework objects. Do not equate those tests with real Google TV
+payloads, third-party app handling or a signed self-upgrade. See
+[STABILISATION](docs/STABILISATION.md). Source-text assertions and reconstructed
+algorithms must not be used as behavioural evidence.
 
 ## Getting started
 
@@ -64,7 +88,7 @@ Open a GitHub issue with:
 - Android/Google TV version (e.g. Android 14)
 - What you clicked, what you expected, what happened
 - `adb logcat` output filtered to the app if you can (attach as a file and
-  redact your TMDB key):
+  redact your TMDB key, recommendation titles and other personal data):
   ```bash
   adb logcat GTV2STREAM:V ActivityTaskManager:I '*:S' > log.txt
   ```

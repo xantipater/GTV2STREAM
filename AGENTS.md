@@ -1,3 +1,20 @@
+# Current maintenance context — 18 September 2026
+
+The historical v1.2 runbook follows below. Its old "current stable v1.1" wording
+and completed workstream assignments are not the current repository state.
+Published v1.2.0 is on `release/1.2` (`36a7022d…`); PR #19 (`f9445fa1…`) is
+unmerged and the stabilisation work preserves it as an ancestor. The fixes are
+unreleased; do not bump versions, merge PRs, publish APKs or change signing keys
+without explicit maintainer instruction. New changes target `release/1.2`.
+
+For current validation, behavioural tradeoffs and unresolved device gates, read
+`docs/STABILISATION.md` and `CONTRIBUTING.md` before using the historical checklist.
+User-authorised stabilisation removes the ineffective cross-app kill permission,
+adds test-APK-only AndroidX runner dependencies and release/runtime CI gates.
+The production app remains free of third-party runtime dependencies.
+
+---
+
 # GTV2STREAM v1.2 Agent Runbook
 
 This file is the authoritative handoff for coding agents working on GTV2STREAM v1.2.

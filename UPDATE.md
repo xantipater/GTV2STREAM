@@ -11,7 +11,20 @@ re-enable the accessibility service.
 Current release: **v1.2.0**. Previous release: v1.1.0. Full version history:
 [CHANGELOG](CHANGELOG.md).
 
-## Route 1: update from inside the app (recommended)
+## Existing v1.2.0 installations: use ADB for the first fixed update
+
+The published v1.2.0 updater incorrectly rejects files smaller than 102,400 bytes;
+the project's v1.2.0 release APK is 66,425 bytes. An error does not necessarily mean
+the next release is corrupt. The installed validator cannot be repaired by a small
+APK it refuses to hand to Android. Use **Route 2 (ADB)** for the first maintenance
+release containing the correction, then use its fixed in-app updater thereafter.
+Do not uninstall merely to work around this size check: a compatible `adb install -r`
+keeps settings. v1.1 has no in-app updater and also needs ADB.
+
+These fixes are currently **unreleased**; the published version is still v1.2.0.
+No future release filename or signing compatibility is assumed here.
+
+## Route 1: update from inside a build containing the updater fix
 
 1. Open **GTV2STREAM** on the TV.
 2. If a newer version exists, a prompt appears: **Update available: GTV2STREAM
@@ -61,8 +74,10 @@ Allow from this source**.
 - **The prompt appears once per release.** Tapping **Later** silences it for that
   version instead of asking again every time you open the app.
 - **The download is verified** before the installer sees it: the file size is
-  checked against the release metadata, and the file has to be a valid APK
-  archive. A file that fails either check is discarded, not installed.
+  checked against the release metadata when available. The ZIP entries and CRCs
+  are checked with bounded reads; Android package metadata must identify a newer
+  GTV2STREAM build matching the release version. Android separately verifies its
+  signature and compatibility at installation. A file that fails either check is discarded, not installed.
 - **A cancelled or failed install changes nothing.** GTV2STREAM reports
   **Installation cancelled** or **Installation failed** and leaves your installed
   version exactly as it was.
@@ -100,7 +115,7 @@ are updating a TV that has no easy way to reach Android settings.
    reconnect on its own:
 
    ```text
-   appops set com.gtv2stream AUTO_START allow
+   adb shell appops set com.gtv2stream AUTO_START allow
    ```
 
 6. Open GTV2STREAM and confirm the service status says **Enabled — Ready**.
@@ -113,9 +128,10 @@ are updating a TV that has no easy way to reach Android settings.
 3. Test both targets with the test buttons, then test one real
    recommendation card on the Google TV home screen.
 
-Your targets, provider whitelist toggles, badge setting and TMDB key all carry
-over. If you want to confirm the key survived, a movie card that redirects in
-under a second is proof: the lookup needs the key.
+Your targets, provider whitelist toggles, badge setting and TMDB key carry over
+on a compatible in-place update. Test an uncached movie recommendation to exercise
+the real TMDB lookup; launch speed and the direct test button do not prove that
+the key works.
 
 ## Troubleshooting
 
@@ -143,10 +159,9 @@ newest release instead. If you specifically need to go backwards, uninstall firs
 
 ### The download fails or times out
 
-The messages are specific: **You appear to be offline** means the TV has no
-network connection, **Download failed** means the connection dropped, **Download
+The messages are specific: **You appear to be offline** usually means name resolution failed, **Download failed** means a network operation failed, **Download
 timed out** means the transfer stalled, and **Download verification failed**
-means the file arrived damaged or was not a valid APK. Nothing is installed in any
+means the file failed size, ZIP, package or version validation. Nothing is installed in any
 of those cases. Check the TV's connection and try again.
 
 ### The service is enabled but nothing redirects

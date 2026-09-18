@@ -5,18 +5,18 @@ released APK with Android Debug Bridge (ADB) over your local network and
 configures the accessibility service required for recommendation redirects.
 
 This guide does not use a USB cable. Your Windows PC and TV must be connected
-to the same local network, and the target app you plan to use (Nuvio, Stremio,
-or SmartTube) must already be installed on the TV.
+to the same local network, and the target app you plan to use (Nuvio, Stremio, WuPlay,
+SmartTube or TizenTube Cobalt) must already be installed on the TV.
 
 ## What you need
 
 - A Windows PC on the same local network as the Google TV or Android TV.
 - A Google TV or Android TV with the Google TV home launcher.
-- The target app you plan to use (Nuvio or Stremio, plus SmartTube for YouTube
+- The target app you plan to use (Nuvio, Stremio or WuPlay, plus SmartTube or TizenTube Cobalt for YouTube
   cards) already installed on the TV.
 - Internet access for downloading Platform-Tools and the APK.
 - The released APK:
-  [GTV2STREAM-v1.1.0.apk](https://github.com/xantipater/GTV2STREAM/releases/download/v1.1.0/GTV2STREAM-v1.1.0.apk)
+  [GTV2STREAM-v1.2.0.apk](https://github.com/xantipater/GTV2STREAM/releases/download/v1.2.0/GTV2STREAM-v1.2.0.apk)
 - Your own free TMDB v3 API key from
   <https://www.themoviedb.org/settings/api>.
 
@@ -27,15 +27,15 @@ or SmartTube) must already be installed on the TV.
    ZIP file.
 2. Extract the ZIP file. This creates a `platform-tools` folder containing
    `adb.exe`.
-3. Download `GTV2STREAM-v1.1.0.apk` from the
+3. Download `GTV2STREAM-v1.2.0.apk` from the
    [GTV2STREAM releases page](https://github.com/xantipater/GTV2STREAM/releases)
    or from this direct URL:
 
    ```text
-   https://github.com/xantipater/GTV2STREAM/releases/download/v1.1.0/GTV2STREAM-v1.1.0.apk
+   https://github.com/xantipater/GTV2STREAM/releases/download/v1.2.0/GTV2STREAM-v1.2.0.apk
    ```
 
-4. Put `GTV2STREAM-v1.1.0.apk` beside `adb.exe` in the extracted
+4. Put `GTV2STREAM-v1.2.0.apk` beside `adb.exe` in the extracted
    `platform-tools` folder.
 
 ## 2. Prepare the TV for network ADB
@@ -115,7 +115,7 @@ Run this command in the same `platform-tools` Command Prompt after either
 connection path has succeeded:
 
 ```text
-adb install -r GTV2STREAM-v1.1.0.apk
+adb install -r GTV2STREAM-v1.2.0.apk
 ```
 
 Wait for the command to finish. `Success` confirms that the APK was installed.
@@ -126,7 +126,7 @@ vendor auto-start firewall, even after they show as enabled. Grant the vendor
 auto-start permission from the same Command Prompt:
 
 ```text
-appops set com.gtv2stream AUTO_START allow
+adb shell appops set com.gtv2stream AUTO_START allow
 ```
 
 You can also allow it on the TV under **Android Settings > Apps > GTV2STREAM
@@ -141,8 +141,8 @@ You can also allow it on the TV under **Android Settings > Apps > GTV2STREAM
    storage on this TV. It is not shared with this project or committed to
    source.
 4. Pick your targets:
-   - **TV & movies target: Nuvio** (default) or **Stremio**.
-   - YouTube recommendations open as a title search in **SmartTube**.
+   - **TV & movies target: Nuvio** (default), **Stremio** or **WuPlay**.
+   - Choose **SmartTube** or **TizenTube Cobalt** for YouTube title searches.
 5. Select **Open Accessibility Settings**.
 6. Select **GTV2STREAM recommendation redirect** and enable it.
 7. Return to GTV2STREAM and confirm that the service status says it is enabled
@@ -165,7 +165,7 @@ install)** in GTV2STREAM's settings.
 3. Repeat with a series recommendation card. A matched series should open in
    the same target app.
 4. YouTube recommendation cards behave differently: they skip the TMDB lookup
-   and open a YouTube title search in SmartTube.
+   and open a YouTube title search in the selected YouTube target.
 5. You can also use the two test buttons in GTV2STREAM's settings. They test
    the currently selected targets and follow the same fresh-task launch
    behavior as real redirects.
@@ -180,7 +180,7 @@ install)** in GTV2STREAM's settings.
    `stremio:///detail/series/<imdb-id>`.
 
 GTV2STREAM ignores advertisements and sponsored cards. YouTube cards are not
-ignored; they open a title search in SmartTube. Test with
+ignored; they open a title search in the selected YouTube target. Test with
 a real movie or series card on the Google TV home screen rather than an
 advertisement or a card inside YouTube.
 
@@ -228,7 +228,7 @@ Android TV build exposes the same debugging controls.
 
 ### `adb install` fails
 
-Confirm that the APK is named `GTV2STREAM-v1.1.0.apk` and is beside `adb.exe`.
+Confirm that the APK is named `GTV2STREAM-v1.2.0.apk` and is beside `adb.exe`.
 Download it again from the official
 [releases page](https://github.com/xantipater/GTV2STREAM/releases) if the file
 is incomplete. Keep the TV connected while the install runs. The `-r` option
@@ -267,7 +267,7 @@ multiple profiles and GTV2STREAM starts a fresh task.
 Open GTV2STREAM and check that its status says the accessibility service is
 enabled and ready. Test a normal movie or series card on the Google TV home
 screen. Ads and sponsored cards are intentionally ignored; YouTube cards open
-a title search in SmartTube.
+a title search in the selected YouTube target.
 
 ## Uninstall
 

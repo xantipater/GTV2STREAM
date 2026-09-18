@@ -2,75 +2,104 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-      - 'release/**'
-      - 'feature/**'
-      - 'fix/**'
-      - 'chore/**'
+    branches: [main, 'release/**', 'feature/**', 'fix/**', 'chore/**']
   pull_request:
-    branches:
-      - main
-      - 'release/1.2'
+    branches: [main, 'release/1.2']
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
-          # The action's old default includes the discontinued "tools" package.
+          # Preserve PR #19: the old default requests the discontinued tools package.
           packages: platform-tools
-
-      - name: Install Android SDK 34
-        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
-
-      - name: Make Gradle wrapper executable
-        run: chmod +x ./gradlew
-
-      - name: Print build environment
+      - run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - run: chmod +x ./gradlew
+      - name: Environment and source identity
         run: |
           ./gradlew --version
-          java -version
-
-      - name: Run helper tests
+          git rev-parse HEAD
+      - name: Executable helper regressions
         run: ./gradlew :app:runHelperTests --stacktrace
-
-      - name: Run lint
-        run: ./gradlew :app:lintDebug --stacktrace
-
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
-
-      - name: Upload debug APK
-        if: success()
+      - name: Debug and release lint
+        run: ./gradlew :app:lintDebug :app:lintRelease --stacktrace
+      - name: Debug, instrumentation and shrunk release builds
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:verifyReleaseArchive --stacktrace
+      - name: Upload build outputs (release is unsigned, not published)
         uses: actions/upload-artifact@v4
         with:
-          name: gtv2stream-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: gtv2stream-builds
+          path: |
+            app/build/outputs/apk/**/*.apk
+            app/build/outputs/mapping/release/**
           if-no-files-found: error
-
-      - name: Upload diagnostics
-        if: failure()
+      - name: Upload all lint and build diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gtv2stream-ci-diagnostics
+          name: gtv2stream-build-reports
           path: |
             app/build/reports/**
+            app/build/outputs/logs/**
+          if-no-files-found: ignore
+
+  android-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        # Declared minimum covers node pooling; 34 covers current target semantics.
+        api: [26, 34]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
+      - name: Upload runtime results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtv2stream-runtime-api-${{ matrix.api }}
+          path: |
+            app/build/reports/androidTests/**
+            app/build/outputs/androidTest-results/**
             app/build/outputs/logs/**
           if-no-files-found: ignore
