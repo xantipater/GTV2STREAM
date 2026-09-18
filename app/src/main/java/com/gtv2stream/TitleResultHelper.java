@@ -2,23 +2,18 @@ package com.gtv2stream;
 
 import java.net.URLEncoder;
 import java.io.UnsupportedEncodingException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Pure title matching and Nuvio URI logic, kept separate for deterministic tests. */
 public final class TitleResultHelper {
-    private static final Pattern YEAR = Pattern.compile("(?<!\\d)((?:19|20)\\d{2})(?!\\d)");
+    private static final Pattern YEAR = Pattern.compile("\\(((?:19|20)\\d{2})\\)");
     private static final Pattern BRACKETED = Pattern.compile("\\[[^]]*]");
     private static final Pattern YEAR_PAREN = Pattern.compile("\\((?:19|20)\\d{2}\\)");
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
-    private static final Pattern NON_ALNUM_RUN = Pattern.compile("[^a-z0-9]+");
+    private static final Pattern NON_ALNUM_RUN = Pattern.compile("[^\\p{L}\\p{N}]+");
 
     private TitleResultHelper() { }
 
@@ -57,39 +52,57 @@ public final class TitleResultHelper {
         return !left.isEmpty() && left.equals(right);
     }
 
-    public static int score(String queryTitle, String queryYear, TmdbClient.Candidate candidate) {
-        String query = normalize(queryTitle);
-        String title = normalize(candidate.title);
-        if (query.isEmpty() || title.isEmpty()) return Integer.MIN_VALUE;
-        int result;
-        if (query.equals(title)) result = 1000;
-        else if (title.contains(query) || query.contains(title)) result = 650;
-        else result = 250 * tokenOverlap(query, title);
-        if (!queryYear.isEmpty() && queryYear.equals(candidate.year)) result += 220;
-        if (candidate.popularity > 0) result += Math.min(50, (int) candidate.popularity);
-        return result;
+    /** Identity for lookups/caches: never share a remake's entry with another year. */
+    public static String matchKey(String raw) {
+        String title = normalizedTitle(raw);
+        return title.isEmpty() ? "" : title + "|" + extractYear(raw);
     }
 
-    private static int tokenOverlap(String a, String b) {
-        Set<String> left = new HashSet<>();
-        Collections.addAll(left, a.split(" "));
-        int count = 0;
-        for (String token : b.split(" ")) if (token.length() > 1 && left.contains(token)) count++;
-        return count;
+    /** Missing metadata is compatible; two explicitly different years are not. */
+    public static boolean compatibleTitles(String left, String right) {
+        if (!normalizedTitleMatches(left, right)) return false;
+        String a = extractYear(left), b = extractYear(right);
+        return a.isEmpty() || b.isEmpty() || a.equals(b);
     }
 
+    /**
+     * Accept only a parenthesised year immediately after the parsed title. Years
+     * in a synopsis/provider row, and numeric titles such as 1917, are not hints.
+     */
+    public static String yearForTitle(String raw, String title) {
+        if (raw == null || title == null || title.isEmpty()) return "";
+        String value = WHITESPACE.matcher(BRACKETED.matcher(raw).replaceAll(" ")).replaceAll(" ");
+        Matcher occurrence = Pattern.compile("(?iu)(?<![\\p{L}\\p{N}])" + Pattern.quote(title)
+                + "(?![\\p{L}\\p{N}])").matcher(value);
+        if (occurrence.find()) {
+            Matcher year = YEAR.matcher(value.substring(occurrence.end()).trim());
+            if (year.lookingAt()) return year.group(1);
+        }
+        return "";
+    }
+
+    /**
+     * A redirect is not a search-results page: an uncertain guess opens the wrong
+     * film. Require an exact normalised title, an exact year when supplied, and
+     * one distinct TMDB identity. Popularity cannot disambiguate remakes or a
+     * same-name film/series. Duplicate rows for the same identity are harmless.
+     */
     public static TmdbClient.Candidate chooseBest(String rawQuery, List<TmdbClient.Candidate> candidates) {
         if (candidates == null || candidates.isEmpty()) return null;
         String queryYear = extractYear(rawQuery);
-        String queryTitle = cleanTitle(rawQuery);
-        List<TmdbClient.Candidate> usable = new ArrayList<>();
-        for (TmdbClient.Candidate c : candidates) {
-            if (c != null && ("movie".equals(c.mediaType) || "tv".equals(c.mediaType))
-                    && !normalize(c.title).isEmpty() && c.tmdbId > 0) usable.add(c);
+        String query = normalizedTitle(rawQuery);
+        if (query.isEmpty()) return null;
+        TmdbClient.Candidate selected = null;
+        for (TmdbClient.Candidate candidate : candidates) {
+            if (candidate == null || candidate.tmdbId <= 0
+                    || !("movie".equals(candidate.mediaType) || "tv".equals(candidate.mediaType))
+                    || !query.equals(normalizedTitle(candidate.title))
+                    || (!queryYear.isEmpty() && !queryYear.equals(candidate.year))) continue;
+            if (selected != null && (selected.tmdbId != candidate.tmdbId
+                    || !selected.mediaType.equals(candidate.mediaType))) return null;
+            selected = candidate;
         }
-        if (usable.isEmpty()) return null;
-        usable.sort(Comparator.comparingInt((TmdbClient.Candidate c) -> score(queryTitle, queryYear, c)).reversed());
-        return usable.get(0);
+        return selected;
     }
 
     public static String nuvioUri(TitleMatch match) {

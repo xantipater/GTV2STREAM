@@ -179,11 +179,23 @@ public final class RecommendationTitleParser {
          * carries no provider edge or watch action). Never derived from the title.
          */
         public final String provider;
+        /** Explicit year metadata, kept separate from the user-facing title. */
+        public final String year;
 
         private Source(String title, boolean youtube, String provider) {
+            this(title, youtube, provider, "");
+        }
+
+        private Source(String title, boolean youtube, String provider, String year) {
+            this.year = year;
             this.title = title;
             this.youtube = youtube;
             this.provider = provider == null ? "" : provider;
+        }
+
+        /** Search/cache identity. Display and provider classification still use title. */
+        public String lookupTitle() {
+            return year.isEmpty() || youtube ? title : title + " (" + year + ")";
         }
 
         public boolean isEmpty() {
@@ -195,6 +207,15 @@ public final class RecommendationTitleParser {
         }
     }
 
+    /** Enrich matching title evidence without discarding an explicit year. */
+    static Source withProviderContext(Source primary, Source context) {
+        if (primary.isEmpty()) return context;
+        if (primary.hasProvider() || !context.hasProvider()
+                || !TitleResultHelper.compatibleTitles(primary.lookupTitle(), context.lookupTitle())) return primary;
+        return new Source(primary.title, context.youtube, context.provider,
+                primary.year.isEmpty() ? context.year : primary.year);
+    }
+
     private static Source source(String title, boolean youtube) {
         return source(title, youtube, youtube ? "youtube" : "");
     }
@@ -202,8 +223,8 @@ public final class RecommendationTitleParser {
     private static Source source(String title, boolean youtube, String provider) {
         if (title.isEmpty()) return Source.NONE;
         String id = canonicalProviderId(provider);
-        if (id.isEmpty() && youtube) id = "youtube";
-        return new Source(title, youtube, id);
+        // Provider evidence, not a word in the title, determines the destination.
+        return new Source(title, "youtube".equals(id), id);
     }
 
     /** Canonical identity for a recognised provider name; "" for anything else. */
@@ -301,45 +322,41 @@ public final class RecommendationTitleParser {
         }
     }
 
-    private static boolean isYoutubeAction(String lower) {
-        // Card-level classification: any payload item mentioning YouTube marks the
-        // card ("Watch on YouTube" actions, "YouTube • 2 weeks ago" video cards,
-        // YouTube channel metadata, provider-first items).
-        return lower.contains("youtube");
+    /** Positive rejection survives beyond parsing; callers must not try stale fallbacks. */
+    static boolean isRejectedPayload(String raw) {
+        String lower = clean(raw).toLowerCase(Locale.US);
+        return lower.contains("sponsored") || lower.contains("advertisement")
+                || lower.startsWith("ad ") || lower.contains("learn more")
+                || lower.contains("install app") || lower.contains("download app");
     }
 
-    /** Selects the first credible item from the direct event text list. */
+    /** Selects only the title slot; metadata is provider evidence, not a fallback title. */
     public static Source fromEventTextSource(List<CharSequence> values) {
         if (values == null || values.isEmpty()) return Source.NONE;
-
-        boolean youtube = false;
         for (CharSequence value : values) {
-            String lower = value == null ? "" : value.toString().toLowerCase(Locale.US);
-            // Sponsored and advertisement cards must never be redirected, even if their
-            // first accessibility item happens to look like a title.
-            if (lower.contains("sponsored") || lower.contains("advertisement")) return Source.NONE;
-            if (isYoutubeAction(lower)) youtube = true;
+            if (isRejectedPayload(value == null ? "" : value.toString())) return Source.NONE;
         }
-
         String first = clean(values.get(0) == null ? "" : values.get(0).toString());
-        boolean firstIsProvider = !first.isEmpty() && isProvider(first);
-        if (firstIsProvider && "youtube".equals(first.toLowerCase(Locale.US))) youtube = true;
-        // Provider identity comes only from a recognised provider edge or watch
-        // action across the card items, never from the title under test.
-        String provider = firstIsProvider ? canonicalProviderId(first) : eventActionProvider(values);
-        if (!first.isEmpty() && !firstIsProvider) {
-            // YouTube video titles run long ("Gemini 3.8 Flash Is HERE –
-            // Testing Google's BEST Model Yet!"). When a card item names
-            // YouTube the card is routed to a YouTube search, never to TMDB, so
-            // the detail-row bound applies; every other payload stays at 7.
-            return source(youtube ? directWithMaxWords(first, 15) : direct(first), youtube, provider);
+        boolean leading = isProvider(first);
+        if (leading && values.size() < 2) return Source.NONE;
+        int slot = leading ? 1 : 0;
+        String raw = values.get(slot) == null ? "" : values.get(slot).toString();
+        String provider = leading ? canonicalProviderId(first) : eventActionProvider(values);
+        Source rich = fromDescriptionSource(raw);
+        if (rich.hasProvider()) {
+            // Conflicting provider evidence is ambiguous, not permission to guess.
+            if (!provider.isEmpty() && !provider.equals(rich.provider)) return Source.NONE;
+            return rich;
         }
-        if (values.size() < 2) return Source.NONE;
+        String title = directWithMaxWords(raw,
+                provider.isEmpty() ? DEFAULT_TITLE_MAX_WORDS : PROVIDER_TITLE_MAX_WORDS);
+        return withYear(source(title, "youtube".equals(provider), provider), raw);
+    }
 
-        // Provider-first payloads such as [ITVX, Trigger Point, ...] are common.
-        // Do not scan farther: metadata and synopsis entries are not title fallbacks.
-        String second = clean(values.get(1) == null ? "" : values.get(1).toString());
-        return source(youtube ? directWithMaxWords(second, 15) : direct(second), youtube, provider);
+    private static Source withYear(Source parsed, String raw) {
+        if (parsed.isEmpty() || parsed.youtube) return parsed;
+        return new Source(parsed.title, false, parsed.provider,
+                TitleResultHelper.yearForTitle(raw, parsed.title));
     }
 
     /** First recognised watch-action provider across card items; "" when none. */
@@ -347,6 +364,7 @@ public final class RecommendationTitleParser {
         for (CharSequence value : values) {
             String item = clean(value == null ? "" : value.toString());
             if (item.isEmpty()) continue;
+            if (item.matches("(?i)^youtube(?:\\s*•\\s*\\S.*)?$")) return "youtube";
             String id = actionProvider(item);
             if (!id.isEmpty()) return id;
             id = requiresProvider(item);
@@ -357,12 +375,17 @@ public final class RecommendationTitleParser {
 
     /** Parses a rich content description or a single view text value. */
     public static Source fromDescriptionSource(String raw) {
+        return withYear(parseDescriptionSource(raw), raw);
+    }
+
+    private static Source parseDescriptionSource(String raw) {
         String value = clean(raw);
         if (value.isEmpty()) return Source.NONE;
 
         String lowerValue = value.toLowerCase(Locale.US);
         if (lowerValue.contains("sponsored") || lowerValue.contains("advertisement")) return Source.NONE;
-        boolean youtube = isYoutubeAction(lowerValue);
+        // Source construction derives the route from recognised provider identity.
+        boolean youtube = false;
 
         // Live YouTube card payloads arrive whole in the content description.
         // Nothing generic can parse them: the channel name after the bullet is
@@ -501,7 +524,7 @@ public final class RecommendationTitleParser {
     private static Source sourceFromCommaMiddle(String[] commas, boolean youtube, String providerId) {
         String rawTitle = trimEdgePunctuation(commas[0]);
         if (rawTitle.isEmpty() || isProviderLoose(rawTitle)) return Source.NONE;
-        String title = directWithMaxWords(rawTitle, 10);
+        String title = directWithMaxWords(rawTitle, PROVIDER_TITLE_MAX_WORDS);
         if (title.isEmpty()) return Source.NONE;
         return source(title, youtube, providerId);
     }
@@ -571,7 +594,7 @@ public final class RecommendationTitleParser {
 
     /** Typed variant of {@link #fromDirectText}: node payloads never carry a provider marker. */
     public static Source fromDirectTextSource(String raw) {
-        return source(direct(raw == null ? "" : raw), false);
+        return withYear(source(direct(raw == null ? "" : raw), false), raw);
     }
 
     /**
@@ -587,7 +610,7 @@ public final class RecommendationTitleParser {
 
     /** Typed variant of {@link #fromDetailTitle}: detail rows never carry a provider marker. */
     public static Source fromDetailTitleSource(String raw) {
-        return source(directWithMaxWords(raw == null ? "" : raw, 15), false);
+        return withYear(source(directWithMaxWords(raw == null ? "" : raw, 15), false), raw);
     }
 
     /**
