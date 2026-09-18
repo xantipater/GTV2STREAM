@@ -47,14 +47,16 @@ final class UpdateChecker {
     static void check(Context context, Listener listener) {
         final Context appContext = context.getApplicationContext();
         final android.content.SharedPreferences prefs = appContext.getSharedPreferences(AppPrefs.PREFS, Context.MODE_PRIVATE);
-        long last = prefs.getLong("update_check_at", 0L);
-        if (System.currentTimeMillis() - last < DAY_MS) {
-            String cached = prefs.getString("update_version", null);
-            if (cached != null && compareVersions(cached, currentVersion(appContext)) > 0)
-                listener.onResult(new UpdateInfo(cached, prefs.getString("update_url", releaseUrl(cached)),
-                        prefs.getString("update_apk_url", null), prefs.getLong("update_apk_size", -1L)));
-            return;
+        // An expired cache remains useful while the refresh is in flight or
+        // fails offline. Do not hide an already-known update for that opening.
+        String cached = prefs.getString("update_version", null);
+        if (cached != null && compareVersions(cached, currentVersion(appContext)) > 0) {
+            listener.onResult(new UpdateInfo(cached, prefs.getString("update_url", releaseUrl(cached)),
+                    prefs.getString("update_apk_url", null), prefs.getLong("update_apk_size", -1L)));
         }
+        long last = prefs.getLong("update_check_at", 0L);
+        long age = System.currentTimeMillis() - last;
+        if (age >= 0 && age < DAY_MS) return;
         prefs.edit().putLong("update_check_at", System.currentTimeMillis()).apply();
         EXECUTOR.execute(() -> {
             String[] result = fetch();
@@ -96,6 +98,11 @@ final class UpdateChecker {
         return 0;
     }
 
+    static boolean isInstalledAtLeast(String release, String installed) {
+        return releaseNumbers(release) != null && installedNumbers(installed) != null
+                && compareVersions(release, installed) <= 0;
+    }
+
     static String parseStableReleaseVersion(String json) {
         if (json == null || Pattern.compile("\\\"draft\\\"\\s*:\\s*true").matcher(json).find()
                 || Pattern.compile("\\\"prerelease\\\"\\s*:\\s*true").matcher(json).find()) return null;
@@ -107,7 +114,8 @@ final class UpdateChecker {
 
     static String parseReleaseUrl(String json, String version) {
         Matcher m = HTML_URL.matcher(json == null ? "" : json);
-        return m.find() ? m.group(1) : releaseUrl(version);
+        String expected = releaseUrl(version);
+        return m.find() && expected.equals(m.group(1)) ? m.group(1) : expected;
     }
 
     /**
@@ -186,35 +194,9 @@ final class UpdateChecker {
         return failure == Failure.OFFLINE || failure == Failure.NETWORK || failure == Failure.TIMEOUT;
     }
 
-    /** Minimum plausible APK size in bytes; smaller downloads are treated as corrupt. */
-    static final long MIN_APK_BYTES = 100L * 1024L;
-
-    /**
-     * Verifies a downloaded file before install: it must exist, meet the minimum
-     * size, match the published size when known, and start with the ZIP/APK
-     * magic ({@code PK\003\004}).
-     */
+    /** Structural transfer check; PackageManager and PackageInstaller validate the package. */
     static boolean isValidApkDownload(java.io.File file, long expectedSize) {
-        if (file == null || !file.isFile()) return false;
-        long length = file.length();
-        if (length < MIN_APK_BYTES) return false;
-        if (expectedSize >= 0L && length != expectedSize) return false;
-        java.io.InputStream in = null;
-        try {
-            in = new java.io.FileInputStream(file);
-            byte[] magic = new byte[4];
-            int read = 0;
-            while (read < 4) {
-                int n = in.read(magic, read, 4 - read);
-                if (n < 0) break;
-                read += n;
-            }
-            return read == 4 && magic[0] == 0x50 && magic[1] == 0x4B && magic[2] == 0x03 && magic[3] == 0x04;
-        } catch (java.io.IOException ignored) {
-            return false;
-        } finally {
-            if (in != null) try { in.close(); } catch (java.io.IOException ignored) { }
-        }
+        return ApkArchive.isValid(file, expectedSize);
     }
 
     enum Failure { OFFLINE, NETWORK, TIMEOUT, CORRUPT, NO_APK, UNKNOWN_SOURCES, INSTALL_CANCELLED, INSTALL_FAILED }
@@ -250,7 +232,7 @@ final class UpdateChecker {
     private static boolean isAllowedApkAsset(String name, String url) {
         if (name == null || url == null) return false;
         if (!name.toLowerCase(Locale.US).endsWith(APK_SUFFIX)) return false;
-        if (!url.startsWith("https://github.com/")) return false;
+        if (!url.startsWith("https://github.com/xantipater/GTV2STREAM/releases/download/")) return false;
         String file = url.substring(url.lastIndexOf('/') + 1);
         return file.toLowerCase(Locale.US).endsWith(APK_SUFFIX);
     }

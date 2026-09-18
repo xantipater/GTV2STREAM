@@ -35,7 +35,8 @@ public final class WuPlayLauncher {
     public static boolean open(AccessibilityService service, TitleMatch match) {
         String uri = TitleResultHelper.wuplayUri(match);
         if (uri == null) {
-            Toast.makeText(service, R.string.missing_match_id, Toast.LENGTH_SHORT).show();
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    Toast.makeText(service, R.string.missing_match_id, Toast.LENGTH_SHORT).show());
             return false;
         }
         String cacheKey = LaunchPolicy.cacheKey(AppPrefs.MOVIES_WUPLAY, uri);
@@ -43,8 +44,9 @@ public final class WuPlayLauncher {
         if (target == null) {
             target = LaunchSupport.resolveHandler(service, uri, WUPLAY_PACKAGES, true);
             if (target == null) {
-                Log.w(TAG, "No WuPlay URI handler resolved for " + uri);
-                Toast.makeText(service, R.string.status_wuplay_missing, Toast.LENGTH_LONG).show();
+                Diagnostics.debug("No WuPlay URI handler resolved for " + uri);
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    Toast.makeText(service, R.string.status_wuplay_missing, Toast.LENGTH_LONG).show());
                 return false;
             }
             LaunchSupport.cacheTarget(cacheKey, target);
@@ -52,7 +54,8 @@ public final class WuPlayLauncher {
         boolean opened = LaunchSupport.launchFresh(
                 service, uri, target, target.packageName, "Fresh WuPlay", cacheKey);
         if (!opened) {
-            Toast.makeText(service, R.string.status_wuplay_missing, Toast.LENGTH_LONG).show();
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    Toast.makeText(service, R.string.status_wuplay_missing, Toast.LENGTH_LONG).show());
         }
         return opened;
     }
@@ -75,7 +78,7 @@ public final class WuPlayLauncher {
         final LaunchSupport.Target target = LaunchSupport.resolveHandler(
                 applicationContext, TEST_URI, WUPLAY_PACKAGES, true);
         if (target == null) {
-            Log.w(TAG, "No WuPlay URI handler resolved for " + TEST_URI);
+            Diagnostics.debug("No WuPlay URI handler resolved for " + TEST_URI);
             if (callback != null) callback.onMissingTarget();
             else Toast.makeText(context, R.string.status_wuplay_missing, Toast.LENGTH_LONG).show();
             return false;

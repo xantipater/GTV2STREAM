@@ -12,8 +12,10 @@ android {
         targetSdk 34
         versionCode 6
         versionName '1.2.0'
-        testInstrumentationRunner 'android.test.runner.AndroidJUnitRunner'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
+
+    buildFeatures { buildConfig true }
 
     buildTypes {
         release {
@@ -42,4 +44,18 @@ tasks.register('runHelperTests', JavaExec) {
     dependsOn 'compileHelperTests'
     classpath = files(helperTestClasses, "${buildDir}/intermediates/javac/debug/compileDebugJavaWithJavac/classes")
     mainClass = 'com.gtv2stream.DeepLinkHelperTest'
+}
+
+// Test APK only: no AndroidX or other third-party library is shipped in the app.
+dependencies {
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}
+
+// Exercise the actual R8/resource-shrunk APK, not a fabricated ZIP header.
+tasks.register('verifyReleaseArchive', JavaExec) {
+    dependsOn 'assembleRelease', 'compileHelperTests'
+    classpath = files(helperTestClasses, "${buildDir}/intermediates/javac/debug/compileDebugJavaWithJavac/classes")
+    mainClass = 'com.gtv2stream.StabilisationTest'
+    args layout.buildDirectory.file('outputs/apk/release/app-release-unsigned.apk').get().asFile.absolutePath
 }

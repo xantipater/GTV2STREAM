@@ -4,6 +4,67 @@ All notable changes to GTV2STREAM are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Launcher app tiles and controls are rejected before any cached recommendation
+  fallback. Returning to an app tile also cancels pending title retries and
+  redirects, addressing the MiX Xplorer false redirect reported in issue #16.
+- Declare scoped visibility for TV/mobile launcher activities on Android 11+
+  and check activity labels as well as application labels. This lets the
+  installed-app guard recognise third-party app tiles without requesting
+  `QUERY_ALL_PACKAGES`.
+- Long presses clear recommendation context and suspend ambient YouTube capture
+  during launcher editing. Move/rearrange controls cannot fall back to an old
+  video title (issue #15).
+
+### Validation still required
+- The issue #15/#16 Onn Android 14 interaction sequences require confirmation on
+  real hardware. Automated fixtures are synthetic boundaries, not captured
+  accessibility payloads from the reporting device.
+
+## [Unreleased] — review stabilisation
+
+### Fixed
+- Preserve PR #19 app/edit controls, scoped app discovery and main-thread launches.
+- Require an unambiguous exact normalised TMDB title; preserve explicit year from
+  parsed payload through lookup and cache. Numeric titles are not release years.
+- Cancel stale results when a newer selection supersedes them; check current
+  generation, target and provider policy immediately before launching.
+- Apply YouTube whitelist policy to reasserts; arm only after a successful launch,
+  permit one reassert and never treat focus alone as click authorisation.
+- Make sponsored payload rejection terminal; do not infer a YouTube provider from
+  a title that happens to contain the word YouTube.
+- Give acquired accessibility nodes one owner; fix 201–299-character clipping;
+  bound capture to visible content in the active launcher window.
+- Surface user-initiated lookup failures; missing-target messages are main-thread safe.
+- Accept small shrunk APKs, validate real ZIP entries/CRCs and package/version
+  metadata with bounded reads, and retain system signature/confirmation checks.
+- Persist installer session outcomes across Activity loss; ignore unrelated session
+  callbacks, prevent concurrent pending installs, and reconcile self-replacement.
+- Correct install filenames and PC-shell commands, release-state and privacy claims.
+- Preserve selected provider and explicit year through delayed detail callbacks;
+  consume failed YouTube click attempts and scope bypass suppression to a selection.
+- Check complete TMDB search results up to five pages before exact matching;
+  incomplete, larger or inconsistent result sets deliberately produce no match.
+- Recover installer outcomes in visible replacement Settings, reject stale queued
+  callbacks, preserve Cancel during metadata refresh, and isolate Activity ownership
+  of downloads and durable outcomes.
+
+### Changed
+- Remove ineffective stock-YouTube background-process killing and its permission.
+- Release builds do not log raw recommendation payloads. Disable normal backup and
+  exclude private preferences from cloud/device-transfer backup.
+- Replace source-string behavioural assertions with executable helper/runtime tests.
+  CI builds/lints both variants and validates the actual shrunk, unsigned APK.
+- Exact matching and click-authorised fallbacks are intentionally more conservative:
+  ambiguous titles or unsupported launcher layouts may now be left alone.
+
+### Validation limits
+- See `docs/STABILISATION.md` and the implementation PR for commands/results.
+- No release version/signing key changed. No new signed release published.
+- Physical Google TV and signed in-place self-update remain required release gates.
+
 ## [1.2.0] - 2026-09-10
 
 ### Added

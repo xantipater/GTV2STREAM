@@ -7,8 +7,8 @@ import java.util.Set;
 
 /** Dependency-free unit test harness; run with ./gradlew runHelperTests. */
 public final class DeepLinkHelperTest {
-    public static void main(String[] args) {
-        int assertions = 0;
+    public static void main(String[] args) throws Exception {
+        int assertions = LauncherInteractionTest.run() + StabilisationTest.run();
         check(!YouTubeTarget.isTizenTube(null), "null YouTube target keeps SmartTube default"); assertions++;
         check(!YouTubeTarget.isTizenTube(YouTubeTarget.SMARTTUBE), "SmartTube target selected"); assertions++;
         check(YouTubeTarget.isTizenTube(YouTubeTarget.TIZENTUBE), "TizenTube target selected"); assertions++;
@@ -283,8 +283,8 @@ public final class DeepLinkHelperTest {
         MatchCache.clear();
         check(MatchCache.get("Landman") == null, "empty cache misses"); assertions++;
         MatchCache.put("Landman", movie);
-        TitleMatch cached = MatchCache.get("landman  (2021)");
-        check(cached == movie, "cache hit is normalized across punctuation, case, and year"); assertions++;
+        TitleMatch cached = MatchCache.get("landman  ");
+        check(cached == movie, "cache hit is normalized across punctuation and case"); assertions++;
         check(MatchCache.get("Different Show") == null, "distinct title misses"); assertions++;
         MatchCache.put("Dune", show);
         check(MatchCache.get("Landman") == movie && MatchCache.get("Dune") == show, "multiple entries retained"); assertions++;
@@ -298,7 +298,7 @@ public final class DeepLinkHelperTest {
         MatchCache.clear();
         check(!MatchCache.isMiss("Unknown Title"), "no miss recorded initially"); assertions++;
         MatchCache.putMiss("Unknown Title");
-        check(MatchCache.isMiss("unknown title  (2021)"), "miss hit is normalized"); assertions++;
+        check(MatchCache.isMiss("unknown title  "), "miss hit is normalized"); assertions++;
         check(MatchCache.get("Unknown Title") == null, "miss stores no match"); assertions++;
         MatchCache.put("Unknown Title", movie);
         check(!MatchCache.isMiss("Unknown Title"), "later hit clears the miss"); assertions++;
@@ -708,64 +708,6 @@ public final class DeepLinkHelperTest {
                         tomorrowFocus.title, tomorrowFocus.youtube, tomorrowFocus.provider, focusAt,
                         "A Different Title", focusAt + 333, focusWindow).isEmpty(),
                 "live focus provider never leaks into another title"); assertions++;
-        String service = readSource("app/src/main/java/com/gtv2stream/TvRecommendationService.java");
-        check(service.contains("lastBypassedTitle")
-                        && service.contains("shouldSuppressProviderlessFallback"),
-                "service suppresses providerless fallback after bypass"); assertions++;
-        // Focus-bridge wiring: focus caches provider-bearing sources
-        // synchronously, the YouTube-only hero poll preserves them, and every
-        // detail-title dispatch carries them only on a title match.
-        String focusHandler = service.substring(service.indexOf("private void handleLauncherFocus"));
-        focusHandler = focusHandler.substring(0, focusHandler.indexOf("\n    private "));
-        check(focusHandler.contains("fromEventTextSource(event.getText())")
-                        && focusHandler.contains("fromDescriptionSource(")
-                        && focusHandler.contains("hasProvider()"),
-                "focus handler parses payloads for provider context"); assertions++;
-        check(focusHandler.contains("focusedHeroSource = immediate"),
-                "focus handler caches provider-bearing source immediately"); assertions++;
-        String heroPoll = service.substring(service.indexOf("pendingHeroCapture = () ->"));
-        heroPoll = heroPoll.substring(0, heroPoll.indexOf("handler.postDelayed(pendingHeroCapture"));
-        // Strengthened from the old "provider cache survives" guard: a fresh
-        // cached title now survives ANY empty poll, provider-bearing or not,
-        // because on this launcher the bottom recommendation row exposes no card
-        // text at all and the hero panel is the only source of its title.
-        check(heroPoll.contains("if (!hasFreshFocusedHeroSource())")
-                        && heroPoll.contains("Never clear a title that is still fresh"),
-                "hero poll preserves a fresh cached title instead of wiping it"); assertions++;
-        String entityHandler = service.substring(service.indexOf("private void handleEntityWindow"));
-        entityHandler = entityHandler.substring(0, entityHandler.indexOf("\n    private "));
-        check(entityHandler.contains("focusedProviderForDetail(title)"),
-                "entity window carries title-matched focus provider"); assertions++;
-        String retryPoll = service.substring(service.indexOf("pendingTitleRetry = () ->"));
-        retryPoll = retryPoll.substring(0, retryPoll.indexOf("handler.postDelayed(pendingTitleRetry"));
-        check(retryPoll.contains("focusedProviderForDetail(title)"),
-                "title retry carries title-matched focus provider"); assertions++;
-        check(service.contains("focusedProviderForDetail(detailTitle)"),
-                "detail click carries title-matched focus provider"); assertions++;
-        check(service.contains("if (!detailProvider.isEmpty()) clearFocusedHeroSource()"),
-                "consumed focus context is cleared after carry"); assertions++;
-        // Live Shang-Chi detail-action no-op: a detail click with no direct or
-        // clicked-node payload must consult the detail title row first and
-        // dispatch it as non-YouTube; window/hero fallbacks run only when the
-        // detail title is absent. Scoped to handleLauncherClick so the test
-        // proves lookup order, not just method presence.
-        String clickHandler = service.substring(service.indexOf("private void handleLauncherClick"));
-        clickHandler = clickHandler.substring(0, clickHandler.indexOf("\n    private ", 1));
-        int clickDirectPos = clickHandler.indexOf("sourceFromClickedNode(event)");
-        int clickDetailPos = clickHandler.indexOf("titleFromDetailRoot()");
-        int clickWindowPos = clickHandler.indexOf("sourceFromWindowPayloads()");
-        int clickHeroPos = clickHandler.indexOf("hasFreshFocusedHeroSource()");
-        check(clickDirectPos >= 0 && clickDetailPos >= 0
-                        && clickWindowPos >= 0 && clickHeroPos >= 0,
-                "click handler consults clicked-node, detail, window, and hero sources"); assertions++;
-        check(clickDirectPos < clickDetailPos
-                        && clickDetailPos < clickWindowPos
-                        && clickWindowPos < clickHeroPos,
-                "detail title precedes window/hero fallback in click handler"); assertions++;
-        check(clickHandler.contains("dispatchTitle(detailTitle, false,"),
-                "detail click dispatches non-YouTube title"); assertions++;
-        check(clickHandler.contains("scheduleTitleRetry()"),
-                "click handler keeps retry fallback when all sources miss"); assertions++;
         // Authoritative detail-title row: the exact 8-word Shang-Chi title is
         // accepted from the dedicated detail path while the general direct
         // parser stays fail-closed at 7 words.
@@ -802,18 +744,6 @@ public final class DeepLinkHelperTest {
                         "Red Blue Green Gold Black White Star Moon Sun Sky Sea Land Fire Ice Rock Stone")
                         .isEmpty(),
                 "detail path rejects titles over 15 words"); assertions++;
-        // Source wiring: the stable detail-title row recursion uses the
-        // dedicated method for both text and contentDescription, and dispatch
-        // re-validates with it so the detail title survives to TMDB lookup.
-        String detailRow = service.substring(service.indexOf("private String titleFromDetailRow"));
-        detailRow = detailRow.substring(0, detailRow.indexOf("\n    private "));
-        check(detailRow.contains("fromDetailTitle"),
-                "detail row recursion uses the dedicated parser"); assertions++;
-        check(!detailRow.contains("fromDirectText(") && !detailRow.contains("fromDescription("),
-                "detail row recursion no longer uses the general parsers"); assertions++;
-        String dispatch = service.substring(service.indexOf("private void dispatchTitle(String title, boolean youtube, String provider)"));
-        check(dispatch.contains("fromDetailTitle"),
-                "dispatch re-validates detail-length titles"); assertions++;
         check(UpdateChecker.parseStableReleaseVersion("{\"draft\" : true, \"prerelease\" : false, \"tag_name\" : \"v1.3.0\"}") == null, "draft ignored"); assertions++;
         check(UpdateChecker.parseStableReleaseVersion("{\"draft\" : false, \"prerelease\" : true, \"tag_name\" : \"v1.3.0\"}") == null, "whitespace prerelease ignored"); assertions++;
         check(UpdateChecker.parseStableReleaseVersion("{\"tag_name\":\"next\"}") == null, "unexpected tag rejected"); assertions++;
@@ -859,18 +789,6 @@ public final class DeepLinkHelperTest {
         check(!ApkUpdater.isAllowedDownloadUrl("https://github.com.evil.example.com/app-release.apk"),
                 "lookalike download host rejected"); assertions++;
         check(!ApkUpdater.isAllowedDownloadUrl(null), "null download URL rejected"); assertions++;
-        check(writeTestApk("valid", true, 200 * 1024) != null
-                && UpdateChecker.isValidApkDownload(writeTestApk("valid-check", true, 200 * 1024), 200 * 1024L),
-                "verified download accepted"); assertions++;
-        check(!UpdateChecker.isValidApkDownload(writeTestApk("wrong-size", true, 200 * 1024), 200 * 1025L),
-                "size-mismatched download rejected"); assertions++;
-        check(!UpdateChecker.isValidApkDownload(writeTestApk("not-apk", false, 200 * 1024), 200 * 1024L),
-                "non-APK download rejected"); assertions++;
-        check(!UpdateChecker.isValidApkDownload(writeTestApk("tiny", true, 1024), 1024L),
-                "undersized download rejected"); assertions++;
-        check(!UpdateChecker.isValidApkDownload(new java.io.File("/nonexistent-gtv2stream-update.apk"), -1L),
-                "missing download rejected"); assertions++;
-        check(!UpdateChecker.isValidApkDownload(null, -1L), "null download rejected"); assertions++;
         check(UpdateChecker.isFailureRetryable(UpdateChecker.Failure.OFFLINE), "offline is retryable"); assertions++;
         check(UpdateChecker.isFailureRetryable(UpdateChecker.Failure.NETWORK), "network error is retryable"); assertions++;
         check(UpdateChecker.isFailureRetryable(UpdateChecker.Failure.TIMEOUT), "timeout is retryable"); assertions++;
@@ -880,111 +798,6 @@ public final class DeepLinkHelperTest {
         check(!UpdateChecker.isFailureRetryable(UpdateChecker.Failure.INSTALL_CANCELLED), "install cancel is not retryable"); assertions++;
         check(!UpdateChecker.isFailureRetryable(UpdateChecker.Failure.INSTALL_FAILED), "install failure is not retryable"); assertions++;
 
-        // Settings QOL contracts: resource-level checks the Android-free harness can verify
-        // by reading raw source text (no android.jar on the helper-test classpath).
-        String settings = readSource("app/src/main/java/com/gtv2stream/SettingsActivity.java");
-        String strings = readSource("app/src/main/res/values/strings.xml");
-        String manifest = readSource("app/src/main/AndroidManifest.xml");
-        check(!settings.contains("targetsLabel"), "redundant movies-target TextView removed"); assertions++;
-        check(settings.contains("refreshTestButtons()"), "test buttons refresh with targets"); assertions++;
-        check(settings.contains("runOnUiThread"), "test results posted to UI thread"); assertions++;
-        check(settings.contains("test_link_failed"), "test failure surfaced to user"); assertions++;
-        check(settings.contains("status_line_plain"), "disabled status avoids dangling dash"); assertions++;
-        check(strings.contains("name=\"status_line_plain\""), "plain status format exists"); assertions++;
-        check(strings.contains("name=\"test_movie\"") && strings.contains("Test TV &amp; movie link (%1$s)"),
-                "movie test label names active target"); assertions++;
-        check(strings.contains("name=\"test_youtube\"") && strings.contains("Test YouTube search (%1$s)"),
-                "youtube test label names active target"); assertions++;
-        check(strings.contains("selected YouTube app (SmartTube or TizenTube Cobalt)"),
-                "SmartTube-only settings copy names both YouTube targets"); assertions++;
-        check(!strings.contains("YouTube cards open as a title search in SmartTube."),
-                "stale SmartTube-only settings note replaced"); assertions++;
-        check(!strings.contains("YouTube redirects use SmartTube."),
-                "stale SmartTube-only setup help replaced"); assertions++;
-        check(countOccurrences(manifest, "<uses-permission") == 4
-                && manifest.contains("android.permission.REQUEST_INSTALL_PACKAGES")
-                && manifest.contains("android.permission.KILL_BACKGROUND_PROCESSES"),
-                "only expected permissions, incl. both owner-approved ones"); assertions++;
-        check(!manifest.contains("FORCE_STOP_PACKAGES"),
-                "no signature-level force-stop permission"); assertions++;
-        // Cobalt routing contract: MPFS at the explicit component, no fallback.
-        String launcher = readSource("app/src/main/java/com/gtv2stream/YouTubeLauncher.java");
-        check(launcher.contains("ACTION_MEDIA_PLAY_FROM_SEARCH"),
-                "Cobalt launch uses the MPFS action"); assertions++;
-        check(launcher.contains("COBALT_ACTIVITY"),
-                "Cobalt launch targets the explicit component"); assertions++;
-        check(!launcher.contains("SMART_TUBE_FALLBACK") && !launcher.contains("falling back to SmartTube")
-                        && !launcher.contains("Fresh YouTube fallback"),
-                "no SmartTube fallback on the TizenTube path"); assertions++;
-        // Cobalt warm-start flags: NEW_TASK|MULTIPLE_TASK|EXCLUDE_FROM_RECENTS,
-        // never CLEAR_TASK (CLEAR_TASK tears the task down and drops the query
-        // on a warm Cobalt; live A/B 0/2 vs 2/2). Default paths keep CLEAR_TASK.
-        String launchSupport = readSource("app/src/main/java/com/gtv2stream/LaunchSupport.java");
-        String cobaltFlags = launchSupport.substring(launchSupport.indexOf("COBALT_FRESH_FLAGS ="));
-        cobaltFlags = cobaltFlags.substring(0, cobaltFlags.indexOf(";"));
-        check(cobaltFlags.contains("FLAG_ACTIVITY_NEW_TASK")
-                        && cobaltFlags.contains("FLAG_ACTIVITY_MULTIPLE_TASK")
-                        && cobaltFlags.contains("FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS"),
-                "Cobalt flags keep NEW_TASK+MULTIPLE_TASK+EXCLUDE_FROM_RECENTS"); assertions++;
-        check(!cobaltFlags.contains("CLEAR_TASK"),
-                "Cobalt flags never CLEAR_TASK"); assertions++;
-        String defaultFlags = launchSupport.substring(launchSupport.indexOf("DEFAULT_FRESH_FLAGS ="));
-        defaultFlags = defaultFlags.substring(0, defaultFlags.indexOf(";"));
-        check(defaultFlags.contains("FLAG_ACTIVITY_NEW_TASK")
-                        && defaultFlags.contains("FLAG_ACTIVITY_CLEAR_TASK"),
-                "default launch flags keep NEW_TASK+CLEAR_TASK"); assertions++;
-        String launchCobalt = launcher.substring(launcher.indexOf("private static boolean launchCobalt"));
-        launchCobalt = launchCobalt.substring(0, launchCobalt.indexOf("\n    private "));
-        check(launchCobalt.contains("COBALT_FRESH_FLAGS"),
-                "launchCobalt uses the Cobalt warm-start flags"); assertions++;
-        check(countOccurrences(launcher, "COBALT_FRESH_FLAGS") == 1,
-                "SmartTube path keeps default flags, Cobalt flags stay Cobalt-only"); assertions++;
-        check(manifest.contains("<package android:name=\"io.gh.reisxd.tizentube.cobalt\""),
-                "Cobalt package visible for the install check"); assertions++;
-        check(settings.contains("TYPE_TEXT_VARIATION_PASSWORD"),
-                "TMDB key field stays masked"); assertions++;
-        // Core controls precede optional/whitelist-style blocks in the settings order.
-        int savePos = settings.indexOf("R.string.save_key");
-        int accessibilityPos = settings.indexOf("R.string.open_accessibility");
-        int movieTestPos = settings.indexOf("runMovieTest()");
-        int badgePos = settings.indexOf("badgeToggleButton = button");
-        int targetsLabelPos = settings.indexOf("targetsLabel");
-        check(savePos >= 0 && accessibilityPos >= 0 && movieTestPos >= 0 && badgePos >= 0,
-                "core settings controls present"); assertions++;
-        check(savePos < accessibilityPos && accessibilityPos < movieTestPos,
-                "key/save, accessibility and test buttons come first"); assertions++;
-        check(targetsLabelPos < 0, "no duplicate movies label ahead of whitelist-style blocks"); assertions++;
-        // Branded wordmark header: existing vector asset, accessible, D-pad safe.
-        check(settings.contains("R.drawable.gtv2stream_logo"), "wordmark header uses existing logo"); assertions++;
-        check(settings.contains("setContentDescription"), "wordmark header has content description"); assertions++;
-        check(settings.contains("setFocusable(false)"), "wordmark header not focusable"); assertions++;
-        // The permission set is frozen and named in full below; any addition has
-        // to be deliberate and owner-approved (see OVERRIDES.md). This branding
-        // workstream added none of them.
-        check(countOccurrences(manifest, "<uses-permission") == 4, "header adds no permissions"); assertions++;
-        String drawableDir = listDir("app/src/main/res/drawable");
-        check(drawableDir.contains("gtv2stream_logo.xml") && drawableDir.contains("tv_banner.xml")
-                && drawableDir.contains("tv_button_background.xml")
-                && countOccurrences(drawableDir, ".xml") == 3, "no unexpected header assets added"); assertions++;
-        String colorDir = listDir("app/src/main/res/color");
-        check(colorDir.contains("tv_button_text.xml")
-                && countOccurrences(colorDir, ".xml") == 1, "button text selector is the only color asset"); assertions++;
-        // Polish batch: focus selector, help back button, version footer.
-        check(settings.contains("R.drawable.tv_button_background")
-                && settings.contains("R.color.tv_button_text"), "buttons use focus selector"); assertions++;
-        String focusBackground = readSource("app/src/main/res/drawable/tv_button_background.xml");
-        check(focusBackground.contains("state_focused")
-                && focusBackground.contains("#73A7FF"), "focused button has stronger background"); assertions++;
-        String focusText = readSource("app/src/main/res/color/tv_button_text.xml");
-        check(focusText.contains("state_focused"), "focused button text keeps contrast"); assertions++;
-        String help = readSource("app/src/main/java/com/gtv2stream/HelpActivity.java");
-        check(help.contains("R.string.back_to_settings") && help.contains("finish()"),
-                "help exits explicitly"); assertions++;
-        check(help.contains("setFocusable(true)"), "help back button is D-pad focusable"); assertions++;
-        check(strings.contains("name=\"back_to_settings\""), "back string exists"); assertions++;
-        check(settings.contains("version_footer") && settings.contains("appVersionName()"),
-                "settings shows version footer"); assertions++;
-        check(strings.contains("name=\"version_footer\""), "version footer string exists"); assertions++;
         // Stock-YouTube divert policy. The launcher starts stock YouTube itself
         // with an explicit intent we can never intercept, so this divert is the
         // only guaranteed redirect. The clicked card must beat the polled ambient
@@ -1023,30 +836,6 @@ public final class DeepLinkHelperTest {
                 "just inside the window is fresh"); assertions++;
         check(!DivertPolicy.isFresh(now + 5000L, now, DivertPolicy.HERO_PANEL_TTL_MS),
                 "a future timestamp is rejected, never treated as freshest"); assertions++;
-        String serviceSource = readSource("app/src/main/java/com/gtv2stream/TvRecommendationService.java");
-        check(serviceSource.contains("divertStockYouTube()"),
-                "service diverts on the stock-YouTube window change"); assertions++;
-        check(serviceSource.contains("rememberCard(source)"),
-                "service caches the clicked card as the divert source"); assertions++;
-        check(serviceSource.contains("rememberCard(immediate)"),
-                "service also caches the card captured at focus time"); assertions++;
-        check(serviceSource.contains("using the focused card title"),
-                "the click fallback prefers the card over the ambient panel"); assertions++;
-        check(!serviceSource.contains("bounds.top < 650"),
-                "the hero-band gate that wiped the divert cache is gone"); assertions++;
-        check(serviceSource.contains("dropStockYouTube(\"before redirect\")")
-                        && serviceSource.contains("dropStockYouTube(\"after redirect\")"),
-                "stock YouTube is dropped on both sides of the YouTube redirect"); assertions++;
-        check(serviceSource.contains("killBackgroundProcesses"),
-                "the drop uses the normal background-process kill"); assertions++;
-        check(serviceSource.contains("noteYoutubeCardFocused()")
-                        && serviceSource.contains("focused YouTube card"),
-                "stock YouTube is dropped while still backgrounded, on card focus"); assertions++;
-        check(serviceSource.contains("reassertLastDivert()"),
-                "a resurfacing stock YouTube is answered with one re-assert"); assertions++;
-        check(serviceSource.contains("Never clear a title that is still fresh"),
-                "an empty panel poll no longer wipes the divert cache"); assertions++;
-
         // Live YouTube recommendation card shape, captured verbatim from the TCL
         // launcher. This payload used to be rejected outright, which is why a
         // YouTube redirect only worked when the ambient panel happened to hold a
@@ -1134,20 +923,6 @@ public final class DeepLinkHelperTest {
                 "picker cycles nuvio, stremio, wuplay"); assertions++;
         check(AppPrefs.MOVIES_STREMIO.equals(LaunchPolicy.nextMoviesTarget("nonsense")),
                 "an unknown stored target restarts the cycle"); assertions++;
-        String wuplaySource = readSource("app/src/main/java/com/gtv2stream/WuPlayLauncher.java");
-        check(wuplaySource.contains("wuplay://movie/tt0371746")
-                        && wuplaySource.contains("app.wuplay.androidtv"),
-                "WuPlay launcher carries the verified scheme and package"); assertions++;
-        check(wuplaySource.contains("LaunchPolicy.cacheKey(AppPrefs.MOVIES_WUPLAY, uri)"),
-                "WuPlay caches its handler under its own target key"); assertions++;
-        check(manifest.contains("scheme=\"wuplay\"") && manifest.contains("app.wuplay.androidtv"),
-                "manifest declares the WuPlay query so the handler is visible"); assertions++;
-        check(serviceSource.contains("WuPlayLauncher.open(this, match)"),
-                "service routes to the WuPlay destination"); assertions++;
-        check(strings.contains("name=\"target_wuplay\"")
-                        && strings.contains("name=\"status_wuplay_missing\""),
-                "WuPlay settings strings exist"); assertions++;
-
         // Update awareness: the version comparison must never be defeatable by a
         // build suffix, or a release like "1.2.0-beta" silently prompts nobody.
         check(UpdateChecker.compareVersions("v1.2.0", "1.2.0") == 0,
@@ -1162,105 +937,10 @@ public final class DeepLinkHelperTest {
                 "suffixes compare on the numeric core only"); assertions++;
         check(UpdateChecker.compareVersions("garbage", "1.2.0") == 0,
                 "an unparseable version still compares safely"); assertions++;
-        // The user-fixable failure must carry an action and be detected before
-        // the download, not after it.
-        check(settings.contains("maybePromptForUpdate(info)"),
-                "Settings prompts once per release on open"); assertions++;
-        check(settings.contains("UPDATE_PROMPTED_VERSION"),
-                "the prompt is remembered so it cannot nag"); assertions++;
-        check(settings.contains("openUnknownSourcesSettings()"),
-                "Settings can jump straight to the install-unknown-apps page"); assertions++;
-        check(settings.contains("ACTION_MANAGE_UNKNOWN_APP_SOURCES"),
-                "the jump uses the real settings action"); assertions++;
-        String apkUpdaterSource = readSource("app/src/main/java/com/gtv2stream/ApkUpdater.java");
-        check(apkUpdaterSource.contains("canInstallUnknownApps(context)"),
-                "the install-unknown-apps check exists"); assertions++;
-        int preCheck = apkUpdaterSource.indexOf("canInstallUnknownApps(context)",
-                apkUpdaterSource.indexOf("private static void runDownload"));
-        int downloadStart = apkUpdaterSource.indexOf("openAllowedConnection(info.apkUrl)");
-        check(preCheck > 0 && downloadStart > preCheck,
-                "that check runs before the download starts, not after"); assertions++;
-        check(strings.contains("name=\"update_later\"")
-                        && strings.contains("name=\"update_allow_installs\""),
-                "the new update prompt strings exist"); assertions++;
-
         System.out.println("DeepLinkHelperTest: PASS (" + assertions + " assertions)");
-    }
-
-    private static java.io.File writeTestApk(String name, boolean apkMagic, int size) {
-        try {
-            java.io.File file = java.io.File.createTempFile("gtv2stream-" + name + "-", ".apk");
-            file.deleteOnExit();
-            try (java.io.OutputStream out = new java.io.FileOutputStream(file)) {
-                byte[] header = apkMagic
-                        ? new byte[] { 0x50, 0x4B, 0x03, 0x04 }
-                        : new byte[] { 0x25, 0x50, 0x44, 0x46 };
-                out.write(header);
-                byte[] chunk = new byte[4096];
-                int remaining = size - header.length;
-                while (remaining > 0) {
-                    int n = Math.min(chunk.length, remaining);
-                    out.write(chunk, 0, n);
-                    remaining -= n;
-                }
-            }
-            return file;
-        } catch (java.io.IOException error) {
-            throw new AssertionError("test APK fixture failed: " + name, error);
-        }
     }
 
     private static void check(boolean condition, String name) {
         if (!condition) throw new AssertionError(name);
-    }
-
-    private static String readSource(String relativePath) {
-        // JavaExec runs with user.dir under app/, so try the module dir first, then the repo root.
-        String[] candidates = {
-                relativePath,
-                relativePath.startsWith("app/") ? relativePath.substring(4) : "app/" + relativePath,
-        };
-        java.nio.file.Path base = java.nio.file.Paths.get(System.getProperty("user.dir"));
-        for (String candidate : candidates) {
-            for (java.nio.file.Path root : new java.nio.file.Path[] { base, base.getParent() }) {
-                if (root == null) continue;
-                try {
-                    byte[] bytes = java.nio.file.Files.readAllBytes(root.resolve(candidate));
-                    return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
-                } catch (Exception ignored) { }
-            }
-        }
-        throw new AssertionError("missing test source: " + relativePath);
-    }
-
-    private static int countOccurrences(String text, String needle) {
-        int count = 0;
-        int from = 0;
-        while (true) {
-            int at = text.indexOf(needle, from);
-            if (at < 0) return count;
-            count++;
-            from = at + needle.length();
-        }
-    }
-
-    private static String listDir(String relativePath) {
-        java.nio.file.Path base = java.nio.file.Paths.get(System.getProperty("user.dir"));
-        String[] candidates = {
-                relativePath,
-                relativePath.startsWith("app/") ? relativePath.substring(4) : "app/" + relativePath,
-        };
-        for (String candidate : candidates) {
-            for (java.nio.file.Path root : new java.nio.file.Path[] { base, base.getParent() }) {
-                if (root == null) continue;
-                try (java.util.stream.Stream<java.nio.file.Path> entries =
-                        java.nio.file.Files.list(root.resolve(candidate))) {
-                    StringBuilder names = new StringBuilder();
-                    entries.forEach(entry -> names.append(entry.getFileName().toString()).append('\n'));
-                    return names.toString();
-                } catch (Exception ignored) { }
-            }
-        }
-        throw new AssertionError("missing test dir: " + relativePath);
     }
 }

@@ -25,7 +25,8 @@ public final class StremioLauncher {
     public static boolean open(AccessibilityService service, TitleMatch match) {
         String uri = TitleResultHelper.stremioUri(match);
         if (uri == null) {
-            Toast.makeText(service, R.string.missing_match_id, Toast.LENGTH_SHORT).show();
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    Toast.makeText(service, R.string.missing_match_id, Toast.LENGTH_SHORT).show());
             return false;
         }
         String cacheKey = LaunchPolicy.cacheKey(AppPrefs.MOVIES_STREMIO, uri);
@@ -34,8 +35,9 @@ public final class StremioLauncher {
             target = LaunchSupport.resolveHandler(
                     service, uri, STREMIO_PACKAGES, true);
             if (target == null) {
-                Log.w(TAG, "No Stremio URI handler resolved for " + uri);
-                Toast.makeText(service, R.string.status_stremio_missing, Toast.LENGTH_LONG).show();
+                Diagnostics.debug("No Stremio URI handler resolved for " + uri);
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    Toast.makeText(service, R.string.status_stremio_missing, Toast.LENGTH_LONG).show());
                 return false;
             }
             LaunchSupport.cacheTarget(cacheKey, target);
@@ -43,7 +45,8 @@ public final class StremioLauncher {
         boolean opened = LaunchSupport.launchFresh(
                 service, uri, target, target.packageName, "Fresh Stremio", cacheKey);
         if (!opened) {
-            Toast.makeText(service, R.string.status_stremio_missing, Toast.LENGTH_LONG).show();
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    Toast.makeText(service, R.string.status_stremio_missing, Toast.LENGTH_LONG).show());
         }
         return opened;
     }
@@ -66,7 +69,7 @@ public final class StremioLauncher {
         final LaunchSupport.Target target = LaunchSupport.resolveHandler(
                 applicationContext, TEST_URI, STREMIO_PACKAGES, true);
         if (target == null) {
-            Log.w(TAG, "No Stremio URI handler resolved for " + TEST_URI);
+            Diagnostics.debug("No Stremio URI handler resolved for " + TEST_URI);
             if (callback != null) callback.onMissingTarget();
             else Toast.makeText(context, R.string.status_stremio_missing, Toast.LENGTH_LONG).show();
             return false;
