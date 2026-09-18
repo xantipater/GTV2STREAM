@@ -75,6 +75,11 @@ public class TvRecommendationService extends AccessibilityService {
     private long lastDispatchedAt;
     private long lastDispatchedGeneration = -1L;
     private long lastLauncherClickAt;
+    /** Provider evidence belongs to a selection, not the duplicate-event timer. */
+    private String selectedTitle = "";
+    private String selectedProvider = "";
+    private boolean selectedYoutube;
+    private long selectedGeneration = -1L;
     /**
      * Last whitelisted bypass, kept apart from the dispatch bookkeeping above
      * so the whitelist check can stay first without a bypass ever suppressing
@@ -84,6 +89,7 @@ public class TvRecommendationService extends AccessibilityService {
     private String lastBypassedTitle = "";
     private boolean lastBypassedYoutube;
     private long lastBypassedAt;
+    private long lastBypassedGeneration = -1L;
 
     /**
      * Periodic connection heartbeat: Settings treats the service as Ready only
@@ -204,8 +210,12 @@ public class TvRecommendationService extends AccessibilityService {
         lastDispatchedAt = 0L;
         lastDispatchedGeneration = -1L;
         lastLauncherClickAt = 0L;
+        selectedTitle = "";
+        selectedProvider = "";
+        selectedGeneration = -1L;
         lastBypassedTitle = "";
         lastBypassedAt = 0L;
+        lastBypassedGeneration = -1L;
     }
 
     private void clearDivert() {
@@ -827,7 +837,14 @@ public class TvRecommendationService extends AccessibilityService {
                 ? RecommendationTitleParser.youtubeSource(title)
                 : RecommendationTitleParser.fromDetailTitleSource(title);
         if (parsed.isEmpty()) return;
-        String query = parsed.lookupTitle();
+        String candidateQuery = parsed.lookupTitle();
+        boolean sameSelection = selectedGeneration == interactionSession.ticket()
+                && youtube == selectedYoutube
+                && TitleResultHelper.compatibleTitles(selectedTitle, candidateQuery);
+        // Use retained year evidence for the actual lookup and duplicate/cancel
+        // identity, not just for provider matching. A bare detail row supplies
+        // no evidence that the user selected a different remake.
+        final String query = sameSelection && parsed.year.isEmpty() ? selectedTitle : candidateQuery;
         long now = SystemClock.elapsedRealtime();
         // A different entity window also supersedes a pending lookup, even on a
         // launcher build that did not deliver its click event.
@@ -837,16 +854,34 @@ public class TvRecommendationService extends AccessibilityService {
             interactionSession.invalidate();
             clearDivert();
         }
-        if (isWhitelistedProvider(provider)) {
+        // Detail callbacks can omit the provider long after the duplicate window
+        // has expired. Keep the selected card's policy on those callbacks, but
+        // never carry it across a new selection or a different title/route.
+        final String currentProvider = provider.isEmpty() && sameSelection ? selectedProvider : provider;
+        selectedTitle = query;
+        selectedProvider = currentProvider;
+        selectedYoutube = youtube;
+        selectedGeneration = interactionSession.ticket();
+        if (youtube) {
+            // Resolving a usable title consumes the click even if the target is
+            // missing, throws, or changes before launch. Only success below may
+            // arm a reassert; a later stock window must not retry a failed click.
+            lastLauncherClickAt = 0L;
+            clearLastCardSource();
+            clearFocusedHeroSource();
+        }
+        if (isWhitelistedProvider(currentProvider)) {
             clearDivert();
-            lastBypassedTitle = query;
+            lastBypassedTitle = selectedTitle;
             lastBypassedYoutube = youtube;
             lastBypassedAt = now;
+            lastBypassedGeneration = interactionSession.ticket();
             return;
         }
-        if (DispatchPolicy.shouldSuppressProviderlessFallback(
+        if (lastBypassedGeneration == interactionSession.ticket()
+                && DispatchPolicy.shouldSuppressProviderlessFallback(
                 lastBypassedTitle, lastBypassedYoutube, lastBypassedAt,
-                query, youtube, provider, now, DUPLICATE_WINDOW_MS)) return;
+                query, youtube, currentProvider, now, DUPLICATE_WINDOW_MS)) return;
         long generation = interactionSession.ticket();
         if (generation == lastDispatchedGeneration
                 && TitleResultHelper.compatibleTitles(lastDispatchedTitle, query)
@@ -857,7 +892,7 @@ public class TvRecommendationService extends AccessibilityService {
         lastDispatchedAt = now;
         lastDispatchedGeneration = generation;
         Diagnostics.debug("Recommendation: " + query);
-        worker.execute(() -> resolveAndOpen(query, youtube, provider, generation));
+        worker.execute(() -> resolveAndOpen(query, youtube, currentProvider, generation));
     }
 
     private void resolveAndOpen(String title, boolean youtube, String provider, long generation) {

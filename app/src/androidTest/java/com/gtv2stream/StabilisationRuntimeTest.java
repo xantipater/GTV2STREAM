@@ -149,6 +149,124 @@ public class StabilisationRuntimeTest {
         assertEquals(2, service.launched.size());
     }
 
+    @Test public void delayedProviderlessDetailKeepsSelectedWhitelistPolicy() throws Exception {
+        whitelist("prime video");
+        click("Dune", "Watch on Prime Video");
+        // Simulate a repeated detail callback after the old duplicate window.
+        // Run the actual fallback dispatch and worker; no policy copy is tested.
+        main(() -> {
+            field(service, "lastBypassedAt", android.os.SystemClock.elapsedRealtime() - 2001L);
+            invoke(service, "dispatchTitle", new Class<?>[] {String.class, boolean.class, String.class},
+                    "Dune", false, "");
+        });
+        drain();
+        assertTrue(service.lookedUp.isEmpty());
+        assertTrue(service.launched.isEmpty());
+        // An explicit selection carries its own provider, even for the same title.
+        click("Dune", "Watch on Netflix"); drain();
+        assertEquals(Collections.singletonList("movie:Dune"), service.launched);
+    }
+
+    @Test public void providerlessDetailStillRechecksPolicyDuringLookup() throws Exception {
+        blockFirst();
+        click("Alien", "Watch on Netflix"); awaitLookup();
+        main(() -> {
+            field(service, "lastDispatchedAt", android.os.SystemClock.elapsedRealtime() - 2001L);
+            invoke(service, "dispatchTitle", new Class<?>[] {String.class, boolean.class, String.class},
+                    "Alien", false, "");
+        });
+        whitelist("netflix");
+        service.release.countDown(); drain();
+        assertTrue(service.launched.isEmpty());
+    }
+
+    @Test public void failedYoutubeLaunchCannotReplayAfterDuplicateWindow() throws Exception {
+        service.youtubeSuccess = false;
+        click("Big Buck Bunny", "Watch on YouTube"); drain();
+        main(() -> field(service, "lastDispatchedAt", android.os.SystemClock.elapsedRealtime() - 2001L));
+        stockYoutube(); drain();
+        assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
+        // A later intentional click is still allowed to retry the selected target.
+        service.youtubeSuccess = true;
+        click("Big Buck Bunny", "Watch on YouTube"); drain();
+        assertEquals(2, service.launched.size());
+        assertEquals(1, service.badges);
+    }
+
+    @Test public void selectedProviderDoesNotCrossTitleOrExplicitYear() throws Exception {
+        whitelist("prime video");
+        click("Dune (1984)", "Watch on Prime Video");
+        main(() -> invoke(service, "dispatchTitle",
+                new Class<?>[] {String.class, boolean.class, String.class}, "Dune", false, ""));
+        drain();
+        assertTrue(service.lookedUp.isEmpty());
+        main(() -> invoke(service, "dispatchTitle",
+                new Class<?>[] {String.class, boolean.class, String.class}, "Dune (2021)", false, ""));
+        drain();
+        assertEquals(Collections.singletonList("Dune (2021)"), service.lookedUp);
+        click("Alien", "Watch on Prime Video");
+        main(() -> invoke(service, "dispatchTitle",
+                new Class<?>[] {String.class, boolean.class, String.class}, "Jaws", false, ""));
+        drain();
+        assertEquals(Arrays.asList("Dune (2021)", "Jaws"), service.lookedUp);
+    }
+
+    @Test public void newProviderlessSelectionDoesNotInheritOldProvider() throws Exception {
+        whitelist("prime video");
+        click("Dune", "Watch on Prime Video");
+        click("Dune"); drain();
+        assertEquals(Collections.singletonList("movie:Dune"), service.launched);
+    }
+
+    @Test public void retainedProviderUsesCurrentWhitelistForPositiveRecovery() throws Exception {
+        whitelist("prime video");
+        click("Dune", "Watch on Prime Video");
+        whitelist("");
+        main(() -> invoke(service, "dispatchTitle",
+                new Class<?>[] {String.class, boolean.class, String.class}, "Dune", false, ""));
+        drain();
+        assertEquals(Collections.singletonList("movie:Dune"), service.launched);
+    }
+
+    @Test public void yearlessDetailLookupKeepsSelectedYearBeyondDuplicateWindow() throws Exception {
+        click("Dune (1984)", "Watch on Netflix"); drain();
+        MatchCache.clear(); // Require another actual lookup rather than a cache hit.
+        main(() -> {
+            field(service, "lastDispatchedAt", android.os.SystemClock.elapsedRealtime() - 2001L);
+            invoke(service, "dispatchTitle", new Class<?>[] {String.class, boolean.class, String.class},
+                    "Dune", false, "");
+        });
+        drain();
+        assertEquals(Arrays.asList("Dune (1984)", "Dune (1984)"), service.lookedUp);
+    }
+
+    @Test public void whitelistRecoveryKeepsSelectedYearForFirstLookup() throws Exception {
+        whitelist("prime video");
+        click("Dune (1984)", "Watch on Prime Video");
+        whitelist("");
+        main(() -> invoke(service, "dispatchTitle",
+                new Class<?>[] {String.class, boolean.class, String.class}, "Dune", false, ""));
+        drain();
+        assertEquals(Collections.singletonList("Dune (1984)"), service.lookedUp);
+    }
+
+    @Test public void conflictingDetailYearCancelsOlderLookupAfterYearlessCallback() throws Exception {
+        blockFirst();
+        click("Dune (1984)", "Watch on Netflix"); awaitLookup();
+        main(() -> {
+            field(service, "lastDispatchedAt", android.os.SystemClock.elapsedRealtime() - 2001L);
+            invoke(service, "dispatchTitle", new Class<?>[] {String.class, boolean.class, String.class},
+                    "Dune", false, "");
+            invoke(service, "dispatchTitle", new Class<?>[] {String.class, boolean.class, String.class},
+                    "Dune (2021)", false, "");
+        });
+        service.release.countDown(); drain();
+        assertEquals(Arrays.asList("Dune (1984)", "Dune (2021)"), service.lookedUp);
+        assertEquals(Collections.singletonList("movie:Dune"), service.launched);
+        assertNull(MatchCache.get("Dune (1984)"));
+        assertNotNull(MatchCache.get("Dune (2021)"));
+    }
+
     @Test public void explicitYearSurvivesEventDescriptionEnrichmentAndLookup() throws Exception {
         main(() -> {
             AccessibilityEvent e = event(AccessibilityEvent.TYPE_VIEW_CLICKED, HOME, "Dune (1984)");
