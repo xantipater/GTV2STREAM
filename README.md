@@ -43,7 +43,7 @@ bands remain device-specific; unknown layouts may miss titles.
 The stabilisation matcher requires one distinct exact normalised title (and the
 explicit year, when present). Ambiguous same-name productions, unmatched names,
 or partial franchise matches produce a visible no-match result rather than a guess.
-This deliberately trades some redirect coverage for correctness. The result's IMDb identifier is then sent to the selected target using exactly:
+Searches cover the complete result set up to five pages. Larger, incomplete or changing result sets are left alone instead of guessing from the first page. Multi-page lookups can take longer. This deliberately trades some redirect coverage for correctness. The result's IMDb identifier is then sent to the selected target using exactly:
 
 - Nuvio — Movie: `nuvio://movie/<imdb-id>` · Series: `nuvio://detail/tv/<imdb-id>`
 - Stremio — Movie: `stremio:///detail/movie/<imdb-id>` · Series: `stremio:///detail/series/<imdb-id>`
@@ -104,7 +104,7 @@ self-update and process-replacement testing remain release gates. GTV2STREAM nev
 
 Android needs **Install unknown apps** allowed for GTV2STREAM before it will accept the package. That permission is checked *before* the download starts, so you are not made to wait through a transfer only to be told afterwards. If it is off, the app offers a button that opens that exact setting page for GTV2STREAM.
 
-Updating in place keeps your settings and your TMDB key, and requires the release APK to be signed with the same key as your installed build, which it is if you installed from the release page. If you built the APK yourself with your own signing key, Android will refuse an in-place update and you will need to uninstall and reinstall.
+A compatible in-place update keeps your settings and TMDB key. Android requires signing compatibility with the installed build. If it rejects a signature, obtain an APK signed by the installed build's signer; uninstalling discards local settings and is not an in-place recovery. Confirm accessibility reconnection after the update.
 
 ### Redirect badge
 
@@ -113,7 +113,7 @@ not proof that a target has finished rendering. A Settings toggle (**Show redire
 
 ### TV auto-start protection (TCL and similar)
 
-TCL TV builds ship a vendor auto-start firewall that can refuse to connect the accessibility service even when it is enabled. The app's status detects this and reports "Blocked by the TV's auto-start protection" with a one-tap fix (allow auto-start in the TV's app info). On the ADB route the equivalent command is `adb shell appops set com.gtv2stream AUTO_START allow`.
+Some TCL TV builds have a vendor auto-start firewall that can refuse to connect the accessibility service even when it is enabled. The app's status detects this and reports "Blocked by the TV's auto-start protection" with a one-tap fix (allow auto-start in the TV's app info). On builds exposing that vendor operation, the ADB equivalent is `adb shell appops set com.gtv2stream AUTO_START allow`. `AUTO_START` is not a standard Android operation; use the TV's app-info setting when available.
 
 ## Setup on Google TV / Android TV
 

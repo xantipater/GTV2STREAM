@@ -4,9 +4,10 @@ This guide covers how to update GTV2STREAM when a newer version is released. The
 are two routes: the built-in update prompt in the app, or the ADB sideload you
 already used to install it.
 
-**Updating keeps your settings and your TMDB key.** Both routes install over the
-existing app rather than replacing it, so you do not need to re-enter anything or
-re-enable the accessibility service.
+**A compatible in-place update keeps your settings and your TMDB key.** Both
+routes install over the
+existing app. Confirm that the accessibility service reconnects afterward;
+OEM restrictions may require the setup steps below again.
 
 Current release: **v1.2.0**. Previous release: v1.1.0. Full version history:
 [CHANGELOG](CHANGELOG.md).
@@ -148,14 +149,16 @@ release does exist and you have already dismissed the prompt once for it, the
 
 The APK you are installing was not signed with the same key as the version on the
 TV, so Android refuses to update it in place. This happens if you built the app
-yourself instead of using a release APK. Uninstall GTV2STREAM and install the
-release fresh, then re-enter your TMDB key and re-enable the accessibility
-service.
+yourself instead of using a release APK. Obtain an APK signed by the signer of
+the installed build. Do not uninstall
+as an in-place recovery: that deletes local settings and the TMDB key, and a
+fresh installation requires accessibility setup again.
 
 ### `INSTALL_FAILED_VERSION_DOWNGRADE`
 
 You are installing an older APK than the version already on the TV. Download the
-newest release instead. If you specifically need to go backwards, uninstall first.
+newest compatible release instead. A downgrade that requires uninstalling loses
+local settings; it is outside this in-place update procedure.
 
 ### The download fails or times out
 

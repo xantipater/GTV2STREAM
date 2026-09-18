@@ -121,16 +121,17 @@ adb install -r GTV2STREAM-v1.2.0.apk
 Wait for the command to finish. `Success` confirms that the APK was installed.
 If the command reports an error, see [Troubleshooting](#troubleshooting).
 
-TCL TVs additionally block accessibility services from *starting* through a
-vendor auto-start firewall, even after they show as enabled. Grant the vendor
-auto-start permission from the same Command Prompt:
+Some TCL builds block accessibility services from *starting* through a vendor
+auto-start firewall even after they show as enabled. If Settings reports this
+block and the TV exposes the vendor operation, grant it from the same Command Prompt:
 
 ```text
 adb shell appops set com.gtv2stream AUTO_START allow
 ```
 
 You can also allow it on the TV under **Android Settings > Apps > GTV2STREAM
-> Auto-start**, when that toggle exists.
+> Auto-start**, when that toggle exists. `AUTO_START` is not a standard Android
+operation; an unknown-operation error means this command is unsupported on that build.
 
 ## 5. Configure GTV2STREAM
 

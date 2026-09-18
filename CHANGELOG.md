@@ -43,6 +43,13 @@ All notable changes to GTV2STREAM are documented here. The format follows
 - Persist installer session outcomes across Activity loss; ignore unrelated session
   callbacks, prevent concurrent pending installs, and reconcile self-replacement.
 - Correct install filenames and PC-shell commands, release-state and privacy claims.
+- Preserve selected provider and explicit year through delayed detail callbacks;
+  consume failed YouTube click attempts and scope bypass suppression to a selection.
+- Check complete TMDB search results up to five pages before exact matching;
+  incomplete, larger or inconsistent result sets deliberately produce no match.
+- Recover installer outcomes in visible replacement Settings, reject stale queued
+  callbacks, preserve Cancel during metadata refresh, and isolate Activity ownership
+  of downloads and durable outcomes.
 
 ### Changed
 - Remove ineffective stock-YouTube background-process killing and its permission.

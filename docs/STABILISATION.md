@@ -164,6 +164,187 @@ use synthetic statuses and a live uncommitted session, not a completed install.
 An independent review by someone other than the implementation author is also
 still a release gate. No main/release merge or publication was performed.
 
+## Independent continuation — 19 September 2026
+
+The live baseline was still `f01bb3112b0f651e858772ebac5411cfc8776414`.
+PR #19 remained its ancestor; PR #20 remained open against `release/1.2`, with
+no review comments. Existing fixes were inspected before these additive changes.
+The coordinator reviewed the TMDB change; separate reviewers checked routing and
+updater changes they did not author. This is scoped peer review, not a claim of
+independent approval of one's own additions.
+
+### Newly corrected gaps
+
+- A delayed providerless detail callback could lose the selected provider after
+  the two-second duplicate window, bypassing the whitelist. Provider evidence now
+  belongs to the same selection generation, title, year and route. Its explicit
+  year also reaches the actual lookup/cache after a title-only callback. A newer
+  explicit remake cancels older work; a new click cannot inherit an old bypass.
+- A failed YouTube launch left click authorization available for a later stock
+  window to replay. A resolved attempt now consumes it; only a successful launch
+  arms the existing single reassert. Genuine new selections still work.
+- `TmdbClient` considered only the default first search page. It now examines a
+  complete, consistent result set of at most five pages before matching. A later
+  remake/series prevents an ambiguous redirect; a unique later-page title can
+  succeed. Larger, incomplete, malformed or changing result sets fail closed.
+  This can add search requests/latency or intentionally produce no match.
+- Foreground replacement Settings now observes durable installer outcomes.
+  Queued callbacks respect listener ownership, terminal state is cleared on retry,
+  a metadata refresh preserves Cancel, and an older Activity cannot cancel a newer
+  Activity's transfer. Paused Settings cannot consume an unseen terminal outcome.
+- Setup/update documentation no longer treats uninstalling as an in-place signing
+  recovery or promises unconditional accessibility reconnection. Vendor auto-start
+  commands are explicitly conditional.
+
+### Local validation and identity
+
+Published code commit: `9354236844771f4cf778f077e00a1d2865c16302`.
+Local tested counterpart: `e8df9b636dcbb6a310c6c56868b786822ded15a2`.
+Both have the exact Git tree `924f05c2f640f3fa80325b3df73f85bb530cfaca`.
+Local Git had no push credentials; the connected GitHub account created additive
+commits and advanced PR #20 without force. Every remote tree hash was checked
+against its local counterpart. This documentation follow-up changes no code.
+
+The Windows 11 harness installed portable Temurin 17.0.20.1 and Android tooling in
+its workspace, used the repository's Gradle 8.13 wrapper, and ran WHPX-accelerated
+Google APIs x86_64 emulators. API 34 (`emulator-5580`) and API 26 (`emulator-5582`)
+were individually selected with `ANDROID_SERIAL`. No existing ADB devices were
+connected. No owner's TV was contacted, cleared or overwritten. Process-local
+TEMP/TMP and IPv4 JVM settings resolved a Windows loopback startup failure; the
+application/build configuration was not weakened to work around it.
+
+The unchanged `f01bb311` baseline passed all helper/lint/build/archive commands
+below and its original 27 API 34 runtime tests. Its local unsigned APK was 59,686
+bytes, SHA-256 `b82ffdb3456825fc78334652b169580d5d20e4b5df5177bc5085056f7a60b77c`.
+This is distinct from the older CI artifact documented above.
+
+| Check actually executed locally | Result |
+|---|---|
+| `:app:runHelperTests` | PASS: 511 assertions, including 63 stabilisation checks. |
+| `:app:lintDebug :app:lintRelease` | PASS: no errors, six warnings per report. |
+| `:app:assembleDebug :app:assembleDebugAndroidTest` | PASS. |
+| `:app:assembleRelease :app:verifyReleaseArchive` | PASS: actual shrunk unsigned APK, 60,830 bytes. |
+| `:app:connectedDebugAndroidTest`, API 34 | PASS: 63 tests, zero failures/errors/skips. |
+| `:app:connectedDebugAndroidTest`, API 26 | PASS: 63 tests, zero failures/errors/skips. |
+| Final diff / release artifact inspection | `git diff --check` passes; compiled manifest, backup XML and DEX inspected. |
+
+The full helper/lint/build/archive matrix was rerun after the final fixture change
+at `e8df9b636dcbb6a310c6c56868b786822ded15a2`; the two final runtime runs use that
+same code/test tree. Documentation edits do not affect the APK. The earlier combined
+62-test run at `723638f1e2ccfc824bd7afe2cf480582276fc595` also passed, but it does
+not substitute for these final 63-test results.
+
+GitHub CI [35406111192](https://github.com/xantipater/GTV2STREAM/actions/runs/35406111192)
+also passed all three jobs for published code `9354236` (PR merge checkout
+`6e20c32cafd7899bacb86e4edfdd7a2cb682d49d`, same tree): helper/lint/build/release
+archive checks and 63 tests on each API. The detailed local XML reports above and
+CI job logs were inspected, not just the workflow badge.
+
+Final local unsigned APK SHA-256:
+`ec1231afbf355ed65dc3b0332b0a4d615dc3c46ef6365363e2695f7d8f1c0d9b`.
+Compiled permissions are INTERNET, REQUEST_INSTALL_PACKAGES and
+SYSTEM_ALERT_WINDOW; neither KILL_BACKGROUND_PROCESSES nor QUERY_ALL_PACKAGES is
+present. The manifest disables backup and references compiled preference-exclusion
+rules for cloud/transfer. DEX inspection found no debug/payload Log.d calls.
+Remaining log calls cover fixed updater/service messages and badge window errors;
+the badge receives no title or key. This does not establish OEM backup execution
+or physical-TV Logcat behavior.
+
+Lint warnings concern target/compile SDK currency, newer test dependencies,
+package visibility (scoped queries are present) and the existing redundant SDK
+check. No new baseline or suppression was added. Gradle 9 deprecation notices remain;
+the separate major toolchain migration is out of scope.
+
+### Regression evidence and boundaries
+
+The isolated `60867d9b55bf353fe0d1c1cf0ce7c94807d61011` checkout kept baseline
+production behavior (apart from an injectable TMDB transport) and ran the added
+regressions: 62 tests, 24 failures. Failures directly reproduced delayed/replayed
+routing and broken Settings controls. That first TMDB fixture was then found to
+supply responses by position alone: an erroneous external-ID request could consume
+page-two JSON and accidentally look like a correct refusal. Its first-page positive
+also unnecessarily required an explicit page=1 parameter. These fixture defects
+were corrected, not counted as product defects.
+
+The corrected TMDB-only negative run at
+`53b0ba7f165f8452b6c88cf27ebf986a1b470fff` ran 13 tests against old behavior:
+10 failed, while first-page matching, encoding, and no-result/invalid-ID controls
+passed. Request endpoint/page assertions now prove that a second search page is
+read before external IDs are requested. All 13 pass with the corrected client.
+The final suite has 36 service/runtime tests, 13 TMDB tests, 11 updater lifecycle
+tests and 3 actual Cobalt-launch entry tests: 63 total. XML reports were inspected.
+
+External TMDB responses and target launches are substituted; no live TMDB key is
+used. Detail fallback regressions invoke the actual service dispatch method because
+the unbound node fixture cannot deliver a live entity-title source tree. The sealed
+event adapter remains test-only. Node pooling/clipping, Handler/Looper, preferences,
+Activities, real uncommitted installer sessions, receivers and Intent construction
+run on Android. Actual Cobalt launch wiring now has endpoint/flags/fallback tests;
+this still does not prove a third-party app displays the requested item.
+
+### Additional observed debug-signed upgrade (API 34)
+
+A separate disposable-emulator probe used this code tree plus an uncommitted test
+and Gradle init-script override (code 6 / 1.2.0 to code 7 / 1.2.1). Both APKs passed
+`apksigner verify` with the same Android Debug signer certificate SHA-256:
+`52eef5f0d542d86445f67ac8e84d4648491ac50a6de7637502888be72fca790b`.
+The 107,291-byte N APK SHA-256 was
+`8912ea93aa5e25d2a021ca1efc393cac5e8afc03fb27e22de93d8c5ae579bf0b`;
+the 107,295-byte N+1 APK SHA-256 was
+`0f1859a3e686277ead0b01bb30345ce18d1d98cc2a62401e85f6b50a603cd10d`.
+
+The probe bypassed network transfer by pushing the real candidate APK. It then
+executed production archive/package/newer-version validation and `commitInstall`.
+Android displayed its actual update-confirmation screen; selecting Update replaced
+the package. System logs show PID 7929 killed for `installPackageLI`, then PID 8054
+started for `UpdateInstallReceiver`. Android reported code 7 / 1.2.1 and the
+receiver persisted STATUS_SUCCESS. Synthetic key/whitelist/badge values survived,
+and Android's accessibility service dump showed the service bound after replacement.
+Instrumentation had temporarily disrupted its pre-install binding; this does not
+establish normal physical-TV reconnection timing. Reopened Settings showed
+Update installed and Enabled—Ready.
+These observations were checked against saved artifact, preference and system-log
+records. No signing key was copied into evidence or source.
+
+The instrumentation runner reported `Process crashed` because self-replacement
+killed its process: this is a successful observed upgrade, **not** a passing JUnit
+test. It is additional evidence, separate from the 63-test suites. Unknown-source
+permission was granted for the emulator; denial/grant UI, installer cancellation,
+signature rejection, real download/retry, physical OEM behavior and compatibility
+with the published production signer were not established by this probe. Production
+version/signing configuration was unchanged. Both test emulators were shut down.
+
+### Refreshed finding status and release gates
+
+| Finding | Status after this continuation |
+|---|---|
+| F1 | Existing app/edit rejection verified; delayed selection/replay gaps newly fixed. Real launcher matrix remains manual. |
+| F2 | Existing exact/unique matcher verified; first-page-only client gap newly fixed and regression-tested. |
+| F3 | Existing typed year/cache keys verified; delayed yearless callback gap newly fixed. |
+| F4 | Existing final launch/reassert checks verified; persistent selection provider closes delayed whitelist bypass. |
+| F5 | Existing bounded APK/package validation verified; additional installer UI/callback gaps newly fixed. Production-signer upgrade gate remains. |
+| F6 | Borrowed initial-node ownership verified on Android; synthetic nodes do not model a live parent connection. |
+| F7 | Actual-node clipping/bounded-capture tests pass; OEM layout assumptions remain. |
+| F8 | Existing main-thread feedback/stale-result suppression verified by runtime tests. |
+| F9 | Existing disclosure/backup/diagnostic changes verified in source and shrunk APK; no historic leak claimed. OEM checks remain. |
+| F10 | Existing filenames/shell context verified; signing recovery and conditional vendor guidance corrected. Physical setup unrun. |
+| F11 | Local baseline, failing regressions, final Android suites and release-build checks now executed; fixture limits stated above. |
+| F12 | No cross-app kill call/permission; actual Cobalt wiring tested. Third-party warm/cold handling remains physical-TV work. |
+
+Additional earlier risks—late A after B (including whitelisted B), provider names
+inside titles, foreign-window capture and lost installer listeners—remain covered.
+No supported-layout fixture, production signer or authorised physical TV was
+available. The smallest remaining owner actions are the specific physical-TV
+matrix below and a compatible production-signed N→N+1 update/recovery check.
+
+PR #13 still has only a `ROADMAP.md` content conflict in a read-only merge-tree
+check of `main` and `release/1.2`. A maintainer must reconcile that roadmap on an
+integration branch while preserving current release and outstanding-gate wording,
+then review the release-to-main merge. Neither branch was merged or overwritten.
+
+Recommendation: ready for code review and physical-device testing, not a release
+approval. No release, production version bump or signing-credential change occurred.
+
 ## Physical-TV and signed-release gates (not completed by this implementation)
 
 1. On an Onn Android 14 device and the supported TCL, focus a YouTube card then
