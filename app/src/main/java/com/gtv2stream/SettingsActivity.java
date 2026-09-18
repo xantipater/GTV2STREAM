@@ -47,6 +47,7 @@ public final class SettingsActivity extends Activity {
     private TextView updateStatus;
     private UpdateChecker.UpdateInfo pendingUpdate;
     private ApkUpdater.DownloadHandle updateDownload;
+    private ApkUpdater.Listener updateListener;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -60,6 +61,7 @@ public final class SettingsActivity extends Activity {
         if (moviesTargetButton != null) refreshTargetButtons();
         refreshWhitelistRows();
         refreshTestButtons();
+        refreshInstallStatus();
     }
 
     private void buildUi() {
@@ -218,7 +220,10 @@ public final class SettingsActivity extends Activity {
                 downloadUpdateButton.setVisibility(View.GONE);
             }
         }
-        maybePromptForUpdate(info);
+        refreshInstallStatus();
+        if (UpdateInstallState.status(this) != android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            maybePromptForUpdate(info);
+        }
     }
 
     /** Opens the release page in the system browser. */
@@ -282,6 +287,10 @@ public final class SettingsActivity extends Activity {
     }
 
     private void startOneTapUpdate() {
+        if (UpdateInstallState.status(this) == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            refreshInstallStatus();
+            return;
+        }
         if (pendingUpdate == null || pendingUpdate.apkUrl == null) {
             setUpdateStatus(getString(R.string.update_no_apk));
             return;
@@ -289,7 +298,7 @@ public final class SettingsActivity extends Activity {
         downloadUpdateButton.setText(getString(R.string.cancel_download));
         downloadUpdateButton.setOnClickListener(v -> cancelOneTapUpdate());
         setUpdateStatus(getString(R.string.update_download_unknown));
-        updateDownload = ApkUpdater.startUpdate(this, pendingUpdate, new ApkUpdater.Listener() {
+        updateListener = new ApkUpdater.Listener() {
             @Override public void onProgress(long downloaded, long total) {
                 runOnUiThread(() -> {
                     if (total > 0L) {
@@ -322,8 +331,8 @@ public final class SettingsActivity extends Activity {
 
             @Override public void onInstallPrompt() {
                 runOnUiThread(() -> {
-                    resetDownloadButton();
-                    setUpdateStatus(getString(R.string.update_confirm_install));
+                    updateDownload = null;
+                    refreshInstallStatus();
                 });
             }
 
@@ -333,7 +342,33 @@ public final class SettingsActivity extends Activity {
                     setUpdateStatus(getString(R.string.update_installed));
                 });
             }
-        });
+        };
+        updateDownload = ApkUpdater.startUpdate(this, pendingUpdate, updateListener);
+    }
+
+    /** Reflect installer outcomes even after Activity/process replacement. */
+    private void refreshInstallStatus() {
+        if (isFinishing() || isDestroyed()) return;
+        int result = UpdateInstallState.status(this);
+        if (result == UpdateInstallState.NONE) return;
+        if (result == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            setUpdateStatus(getString(R.string.update_confirm_install));
+            if (downloadUpdateButton != null) downloadUpdateButton.setEnabled(false);
+                downloadUpdateButton.setText(R.string.update_confirm_install);
+            return;
+        }
+        if (downloadUpdateButton != null) downloadUpdateButton.setEnabled(true);
+        if (result == android.content.pm.PackageInstaller.STATUS_SUCCESS) {
+            setUpdateStatus(getString(R.string.update_installed));
+        } else if (result == android.content.pm.PackageInstaller.STATUS_FAILURE_ABORTED) {
+            setUpdateStatus(getString(R.string.update_install_cancelled));
+        } else if (result == android.content.pm.PackageInstaller.STATUS_FAILURE_BLOCKED) {
+            setUpdateStatus(getString(R.string.update_unknown_sources));
+            showAllowInstallsAction();
+        } else {
+            setUpdateStatus(getString(R.string.update_install_failed));
+        }
+        UpdateInstallState.clear(this);
     }
 
     private void cancelOneTapUpdate() {
@@ -344,7 +379,9 @@ public final class SettingsActivity extends Activity {
     }
 
     private void resetDownloadButton() {
+        if (isFinishing() || isDestroyed()) return;
         updateDownload = null;
+        if (downloadUpdateButton != null) downloadUpdateButton.setEnabled(true);
         if (downloadUpdateButton != null && pendingUpdate != null && pendingUpdate.apkUrl != null) {
             downloadUpdateButton.setText(getString(R.string.download_update, pendingUpdate.version));
             downloadUpdateButton.setOnClickListener(v -> startOneTapUpdate());
@@ -370,13 +407,15 @@ public final class SettingsActivity extends Activity {
     }
 
     private void setUpdateStatus(String message) {
-        if (updateStatus == null) return;
+        if (updateStatus == null || isFinishing() || isDestroyed()) return;
         updateStatus.setText(message);
         updateStatus.setVisibility(View.VISIBLE);
     }
 
     @Override protected void onDestroy() {
         ApkUpdater.cancelActive();
+        ApkUpdater.detachListener(updateListener);
+        updateListener = null;
         super.onDestroy();
     }
 
@@ -595,7 +634,8 @@ public final class SettingsActivity extends Activity {
         boolean showAppInfoFix = false;
         if (enabled && bound && connected) {
             status.setText(getString(R.string.status_line, getString(R.string.service_status_title),
-                    getString(R.string.status_enabled), getString(R.string.status_ready)));
+                    getString(R.string.status_enabled),
+                    getString(hasKey ? R.string.status_ready : R.string.status_ready_no_key)));
             status.setTextColor(Color.rgb(123, 228, 149));
         } else if (enabled && (!bound || !connected)) {
             // Enabled in the accessibility settings, but the system never bound it:
@@ -647,7 +687,7 @@ public final class SettingsActivity extends Activity {
     private boolean serviceActuallyConnected() {
         long at = getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE)
                 .getLong(AppPrefs.SERVICE_CONNECTED_AT, 0L);
-        // Fresh within twice the heartbeat interval; the service rewrites it every 15 s.
+        // Allow up to four heartbeat intervals; the service rewrites it every 15 s.
         return at > 0L && System.currentTimeMillis() - at < 60000L;
     }
 
