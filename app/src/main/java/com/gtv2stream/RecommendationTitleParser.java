@@ -139,6 +139,7 @@ public final class RecommendationTitleParser {
             "pair new remote", "revert", "power on", "energy saver",
             // Launcher edit mode.
             "display", "move", "move up", "move down", "move to top", "move to front",
+            "move left", "move right", "move app", "move apps", "rearrange apps", "reorder apps",
             "remove", "remove from row", "edit", "rename", "delete", "add", "arrange",
             "rearrange", "reorder", "customize", "hide", "show", "select", "close",
             "menu", "next", "previous", "skip", "done", "cancel", "ok", "apply",
@@ -155,6 +156,18 @@ public final class RecommendationTitleParser {
             "mr", "mrs", "ms", "dr", "st", "jr", "sr", "prof", "rev", "lt", "sgt", "no");
 
     private RecommendationTitleParser() { }
+
+    /**
+     * Positive evidence of a launcher control, distinct from an unreadable card.
+     * Grid labels are deliberately excluded: real cards can expose only Column N.
+     * Playback actions are allowed to reach the authoritative entity-title row.
+     */
+    static boolean isNonContentControl(String raw) {
+        String lower = clean(raw).toLowerCase(Locale.US);
+        return UI_WORDS.contains(lower)
+                && !lower.equals("watch") && !lower.equals("watch now")
+                && !lower.equals("play") && !lower.equals("trailer");
+    }
 
     /** A parsed payload: the title (possibly empty) and whether the card is YouTube content. */
     public static final class Source {

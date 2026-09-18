@@ -1,6 +1,7 @@
 package com.gtv2stream;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.Intent;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -48,6 +49,8 @@ public final class TvRecommendationService extends AccessibilityService {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Runnable pendingTitleRetry;
     private Runnable pendingHeroCapture;
+    private final LauncherInteractionPolicy.Session interactionSession =
+            new LauncherInteractionPolicy.Session();
     private RecommendationTitleParser.Source focusedHeroSource =
             RecommendationTitleParser.Source.NONE;
     private long focusedHeroCapturedAt;
@@ -124,13 +127,35 @@ public final class TvRecommendationService extends AccessibilityService {
             return;
         }
         logRawLauncherEvent(event);
+        if (type == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
+            interactionSession.beginEditing();
+            clearRecommendationContext();
+            return;
+        }
+        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED
+                || type == AccessibilityEvent.TYPE_VIEW_FOCUSED
+                || type == AccessibilityEvent.TYPE_VIEW_SELECTED) {
+            LauncherInteractionPolicy.Assessment interaction = assessInteraction(event);
+            if (!interactionSession.accept(interaction,
+                    type == AccessibilityEvent.TYPE_VIEW_CLICKED)) {
+                // Rejected controls are terminal, not missing card payloads.
+                // Otherwise Move/app tiles fall through to a stale YouTube panel.
+                clearRecommendationContext();
+                return;
+            }
+        }
         if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             handleLauncherClick(event);
         } else if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 && isEntityWindow(event.getClassName())) {
+            interactionSession.showDetail();
             handleEntityWindow();
         } else if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 && isHomeWindow(event.getClassName())) {
+            interactionSession.returnHome();
+            clearRecommendationContext();
+            // Refresh activity labels when returning from an install/update.
+            worker.execute(this::loadInstalledAppLabels);
             // The launcher's already-focused card may not emit a new focus event
             // when Home opens. Capture its hero payload before a quick click can
             // hand the recommendation to stock YouTube.
@@ -139,6 +164,38 @@ public final class TvRecommendationService extends AccessibilityService {
                 || type == AccessibilityEvent.TYPE_VIEW_SELECTED) {
             handleLauncherFocus(event);
         }
+    }
+
+    private LauncherInteractionPolicy.Assessment assessInteraction(AccessibilityEvent event) {
+        Set<String> labels = installedAppLabels;
+        // Do not guess while PackageManager's initial worker-side load is pending.
+        if (labels == null) return new LauncherInteractionPolicy.Assessment(true, false, false, false);
+        AccessibilityNodeInfo source = event.getSource();
+        try {
+            // Read all direct evidence before classifying: a provider-only event
+            // can belong to a real card whose title exists only on the node.
+            return LauncherInteractionPolicy.assess(event.getText(),
+                    toString(event.getContentDescription()),
+                    source == null ? "" : toString(source.getText()),
+                    source == null ? "" : toString(source.getContentDescription()), labels);
+        } finally {
+            if (source != null) source.recycle();
+        }
+    }
+
+    private void clearRecommendationContext() {
+        cancelTitleRetry();
+        if (pendingHeroCapture != null) {
+            handler.removeCallbacks(pendingHeroCapture);
+            pendingHeroCapture = null;
+        }
+        clearFocusedHeroSource();
+        clearLastCardSource();
+        lastDivertTitle = "";
+        lastDivertAt = 0L;
+        divertReassertsLeft = 0;
+        lastDispatchedTitle = "";
+        lastDispatchedAt = 0L;
     }
 
     private void handleLauncherFocus(AccessibilityEvent event) {
@@ -347,9 +404,15 @@ public final class TvRecommendationService extends AccessibilityService {
         divertReassertsLeft--;
         lastDivertAt = now;
         final String title = lastDivertTitle;
+        final long generation = interactionSession.ticket();
         Log.i(TAG, "Stock YouTube resurfaced after the redirect; re-asserting the search");
-        worker.execute(() -> {
-            if (YouTubeLauncher.open(this, title)) RedirectBadge.show(this);
+        handler.post(() -> {
+            if (!interactionSession.isCurrent(generation)) return;
+            try {
+                if (YouTubeLauncher.open(this, title)) RedirectBadge.show(this);
+            } catch (RuntimeException error) {
+                Log.w(TAG, "YouTube reassert failed: " + error.getMessage());
+            }
         });
         return true;
     }
@@ -772,10 +835,12 @@ public final class TvRecommendationService extends AccessibilityService {
         Log.i(TAG, "Google TV recommendation title: " + cleaned
                 + (youtube ? " (YouTube)" : ""));
         final String resolvedTitle = cleaned;
-        worker.execute(() -> resolveAndOpen(resolvedTitle, youtube));
+        final long generation = interactionSession.ticket();
+        worker.execute(() -> resolveAndOpen(resolvedTitle, youtube, generation));
     }
 
-    private void resolveAndOpen(String title, boolean youtube) {
+    private void resolveAndOpen(String title, boolean youtube, long generation) {
+        if (!interactionSession.isCurrent(generation)) return;
         // Launcher app tiles read like single-word titles; fail closed. This
         // runs on the worker (not the accessibility callback) and the label
         // set is warmed on connect, so the first redirect never blocks event
@@ -793,10 +858,17 @@ public final class TvRecommendationService extends AccessibilityService {
             // now backgrounded by this redirect and no longer able to take the
             // foreground back.
             dropStockYouTube("before redirect");
-            if (YouTubeLauncher.open(this, title)) {
-                dropStockYouTube("after redirect");
-                RedirectBadge.show(this);
-            }
+            handler.post(() -> {
+                if (!interactionSession.isCurrent(generation)) return;
+                try {
+                    if (YouTubeLauncher.open(this, title)) {
+                        worker.execute(() -> dropStockYouTube("after redirect"));
+                        RedirectBadge.show(this);
+                    }
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "YouTube redirect failed: " + error.getMessage());
+                }
+            });
             return;
         }
         // One prefs read per click: the TMDB key and the film/series target come
@@ -829,12 +901,20 @@ public final class TvRecommendationService extends AccessibilityService {
             } else {
                 Log.i(TAG, "Cached TMDB match reused for: " + title);
             }
-            boolean opened = openMoviesTarget(moviesTarget, match);
-            Log.i(TAG, "TMDB match: " + match.title + " -> "
-                    + moviesTargetUri(moviesTarget, match));
-            if (opened) {
-                RedirectBadge.show(this);
-            }
+            // Serialize the final launch with accessibility events. A cancelled
+            // lookup cannot launch later, even if it was already in flight.
+            final TitleMatch resolved = match;
+            handler.post(() -> {
+                if (!interactionSession.isCurrent(generation)) return;
+                try {
+                    boolean opened = openMoviesTarget(moviesTarget, resolved);
+                    Log.i(TAG, "TMDB match: " + resolved.title + " -> "
+                            + moviesTargetUri(moviesTarget, resolved));
+                    if (opened) RedirectBadge.show(this);
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "Movie/TV redirect failed: " + error.getMessage());
+                }
+            });
         } catch (TmdbClient.InvalidApiKeyException error) {
             Log.w(TAG, "TMDB rejected the configured key");
             notifyUser(R.string.key_rejected);
@@ -890,6 +970,7 @@ public final class TvRecommendationService extends AccessibilityService {
 
     /** YouTube cards expose their title and provider in the hero panel. */
     private RecommendationTitleParser.Source sourceFromWindowPayloads() {
+        if (interactionSession.isEditing()) return RecommendationTitleParser.Source.NONE;
         List<String> entries = new ArrayList<>();
         List<AccessibilityWindowInfo> windows = getWindows();
         if (windows == null) return RecommendationTitleParser.Source.NONE;
@@ -1007,8 +1088,6 @@ public final class TvRecommendationService extends AccessibilityService {
      */
     private Set<String> loadInstalledAppLabels() {
         try {
-            Set<String> labels = installedAppLabels;
-            if (labels != null) return labels;
             Set<String> loaded = new HashSet<>();
             PackageManager packageManager = getPackageManager();
             List<android.content.pm.ApplicationInfo> apps =
@@ -1016,6 +1095,17 @@ public final class TvRecommendationService extends AccessibilityService {
             java.util.List<String> raw = new java.util.ArrayList<>(apps.size());
             for (android.content.pm.ApplicationInfo app : apps) {
                 raw.add(String.valueOf(packageManager.getApplicationLabel(app)));
+            }
+            // The tile can use an activity/alias label instead of the app label
+            // (e.g. a file manager's launcher name). Both launcher categories
+            // have matching visibility declarations in AndroidManifest.xml.
+            for (String category : new String[] {
+                    Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER }) {
+                Intent intent = new Intent(Intent.ACTION_MAIN).addCategory(category);
+                for (android.content.pm.ResolveInfo activity
+                        : packageManager.queryIntentActivities(intent, 0)) {
+                    raw.add(String.valueOf(activity.loadLabel(packageManager)));
+                }
             }
             loaded.addAll(AppLabelPolicy.normalizeAll(raw));
             installedAppLabels = loaded;
@@ -1049,6 +1139,7 @@ public final class TvRecommendationService extends AccessibilityService {
     @Override public void onInterrupt() { }
 
     @Override public void onDestroy() {
+        interactionSession.invalidate();
         heartbeatHandler.removeCallbacks(heartbeat);
         if (pendingHeroCapture != null) handler.removeCallbacks(pendingHeroCapture);
         getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE).edit()

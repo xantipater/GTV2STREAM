@@ -3,7 +3,7 @@
      cards emit click events under a different package than the launcher
      (com.google.android.apps.tv.launcherx). The service filters in code. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeViewClicked|typeWindowStateChanged|typeViewFocused|typeViewSelected"
+    android:accessibilityEventTypes="typeViewClicked|typeViewLongClicked|typeWindowStateChanged|typeViewFocused|typeViewSelected"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
