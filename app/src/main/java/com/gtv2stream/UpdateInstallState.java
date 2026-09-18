@@ -8,7 +8,7 @@ import android.content.pm.PackageInstaller;
 final class UpdateInstallState {
     private static final String SESSION = "install_session";
     private static final String VERSION = "install_version";
-    private static final String STATUS = "install_status";
+    static final String STATUS = "install_status";
     static final int NONE = Integer.MIN_VALUE;
     private UpdateInstallState() { }
 

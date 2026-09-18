@@ -7,6 +7,7 @@ import android.app.AppOpsManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -48,6 +49,10 @@ public final class SettingsActivity extends Activity {
     private UpdateChecker.UpdateInfo pendingUpdate;
     private ApkUpdater.DownloadHandle updateDownload;
     private ApkUpdater.Listener updateListener;
+    private boolean resumed;
+    private final SharedPreferences.OnSharedPreferenceChangeListener installStatusListener = (prefs, key) -> {
+        if (UpdateInstallState.STATUS.equals(key)) refreshInstallStatus();
+    };
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -57,11 +62,23 @@ public final class SettingsActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        resumed = true;
+        // A replacement Activity has no download callback. Observe the durable
+        // result while visible; paused instances must leave it for the active UI.
+        getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE)
+                .registerOnSharedPreferenceChangeListener(installStatusListener);
         if (status != null) updateStatus();
         if (moviesTargetButton != null) refreshTargetButtons();
         refreshWhitelistRows();
         refreshTestButtons();
         refreshInstallStatus();
+    }
+
+    @Override protected void onPause() {
+        resumed = false;
+        getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE)
+                .unregisterOnSharedPreferenceChangeListener(installStatusListener);
+        super.onPause();
     }
 
     private void buildUi() {
@@ -206,6 +223,9 @@ public final class SettingsActivity extends Activity {
     private void showUpdate(UpdateChecker.UpdateInfo info) {
         if (isFinishing() || (Build.VERSION.SDK_INT >= 17 && isDestroyed())
                 || updateNotice == null || updateButton == null) return;
+        // A delayed refresh of the cached release must preserve this transfer's
+        // Cancel action and version until it finishes.
+        if (updateDownload != null) return;
         pendingUpdate = info;
         updateNotice.setText(getString(R.string.update_available, info.version));
         updateNotice.setVisibility(View.VISIBLE);
@@ -348,7 +368,7 @@ public final class SettingsActivity extends Activity {
 
     /** Reflect installer outcomes even after Activity/process replacement. */
     private void refreshInstallStatus() {
-        if (isFinishing() || isDestroyed()) return;
+        if (!resumed || isFinishing() || isDestroyed()) return;
         int result = UpdateInstallState.status(this);
         if (result == UpdateInstallState.NONE) return;
         if (result == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
@@ -377,7 +397,7 @@ public final class SettingsActivity extends Activity {
     }
 
     private void cancelOneTapUpdate() {
-        ApkUpdater.cancelActive();
+        ApkUpdater.cancel(updateDownload);
         updateDownload = null;
         resetDownloadButton();
         setUpdateStatus(getString(R.string.update_cancelled));
@@ -418,7 +438,9 @@ public final class SettingsActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
-        ApkUpdater.cancelActive();
+        getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE)
+                .unregisterOnSharedPreferenceChangeListener(installStatusListener);
+        ApkUpdater.cancel(updateDownload);
         ApkUpdater.detachListener(updateListener);
         updateListener = null;
         super.onDestroy();

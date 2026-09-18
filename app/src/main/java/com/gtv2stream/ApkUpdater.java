@@ -110,9 +110,14 @@ final class ApkUpdater {
             Listener listener) {
         if (UpdateInstallState.status(context) == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             pendingListener = listener;
-            main().post(listener::onInstallPrompt);
+            main().post(() -> {
+                if (pendingListener == listener) listener.onInstallPrompt();
+            });
             return new DownloadHandle();
         }
+        // A retry owns a new operation; delayed preference notifications must
+        // not resurrect the previous installer's terminal outcome.
+        UpdateInstallState.clear(context);
         cancelActive();
         final DownloadHandle handle = new DownloadHandle();
         active = handle;
@@ -131,8 +136,14 @@ final class ApkUpdater {
     }
 
     static synchronized void cancelActive() {
-        if (active != null) active.cancel();
-        active = null;
+        cancel(active);
+    }
+
+    /** An older Activity must never cancel a newer Activity's transfer. */
+    static synchronized void cancel(DownloadHandle handle) {
+        if (handle == null) return;
+        handle.cancel();
+        if (active == handle) active = null;
     }
 
     /** Settings may be destroyed while the system installer is still running. */
@@ -145,23 +156,31 @@ final class ApkUpdater {
         if (!UpdateInstallState.record(context, sessionId, status)) return;
         final Listener listener = pendingListener;
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) return;
-        pendingListener = null;
         active = null;
         if (listener == null) return;
-        switch (status) {
-            case PackageInstaller.STATUS_SUCCESS:
-                main().post(listener::onInstalled);
-                break;
-            case PackageInstaller.STATUS_FAILURE_ABORTED:
-                main().post(() -> listener.onFailure(UpdateChecker.Failure.INSTALL_CANCELLED));
-                break;
-            case PackageInstaller.STATUS_FAILURE_BLOCKED:
-                main().post(() -> listener.onFailure(UpdateChecker.Failure.UNKNOWN_SOURCES));
-                break;
-            default:
-                main().post(() -> listener.onFailure(UpdateChecker.Failure.INSTALL_FAILED));
-                break;
-        }
+        main().post(() -> {
+            // The Activity can be destroyed or a retry can take ownership while
+            // this result waits on the main queue. The durable outcome survives
+            // either event; only the currently attached UI may receive it.
+            synchronized (ApkUpdater.class) {
+                if (pendingListener != listener) return;
+                pendingListener = null;
+            }
+            switch (status) {
+                case PackageInstaller.STATUS_SUCCESS:
+                    listener.onInstalled();
+                    break;
+                case PackageInstaller.STATUS_FAILURE_ABORTED:
+                    listener.onFailure(UpdateChecker.Failure.INSTALL_CANCELLED);
+                    break;
+                case PackageInstaller.STATUS_FAILURE_BLOCKED:
+                    listener.onFailure(UpdateChecker.Failure.UNKNOWN_SOURCES);
+                    break;
+                default:
+                    listener.onFailure(UpdateChecker.Failure.INSTALL_FAILED);
+                    break;
+            }
+        });
     }
 
     private static void runDownload(Context context, UpdateChecker.UpdateInfo info,
