@@ -19,10 +19,21 @@ public final class TmdbClient {
     private static final String API = "https://api.themoviedb.org/3";
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int READ_TIMEOUT_MS = 10000;
+    private static final int MAX_SEARCH_PAGES = 5;
     private final String apiKey;
+    private final Transport transport;
+
+    interface Transport {
+        String get(String address) throws IOException;
+    }
 
     public TmdbClient(String apiKey) {
+        this(apiKey, null);
+    }
+
+    TmdbClient(String apiKey, Transport transport) {
         this.apiKey = apiKey == null ? "" : apiKey.trim();
+        this.transport = transport == null ? this::get : transport;
     }
 
     public static final class Candidate {
@@ -45,33 +56,58 @@ public final class TmdbClient {
         if (apiKey.length() < 10) throw new InvalidApiKeyException();
         String query = TitleResultHelper.cleanTitle(rawTitle);
         if (query.isEmpty()) return null;
-        String body = get(API + "/search/multi?api_key=" + encode(apiKey)
-                + "&query=" + encode(query) + "&include_adult=false");
-        final JSONArray results;
-        try {
-            results = new JSONObject(body).optJSONArray("results");
-        } catch (org.json.JSONException error) {
-            throw new IOException("TMDB returned invalid JSON", error);
-        }
-        if (results == null) return null;
         List<Candidate> candidates = new ArrayList<>();
-        for (int i = 0; i < results.length(); i++) {
-            JSONObject item = results.optJSONObject(i);
-            if (item == null) continue;
-            String mediaType = item.optString("media_type", "");
-            String titleKey = "movie".equals(mediaType) ? "title" : "name";
-            String dateKey = "movie".equals(mediaType) ? "release_date" : "first_air_date";
-            String title = item.optString(titleKey, "").trim();
-            long id = item.optLong("id", -1L);
-            if (("movie".equals(mediaType) || "tv".equals(mediaType)) && !title.isEmpty() && id > 0) {
+        int totalPages = -1, totalResults = -1;
+        long receivedResults = 0;
+        String search = API + "/search/multi?api_key=" + encode(apiKey)
+                + "&query=" + encode(query) + "&include_adult=false&page=";
+        for (int page = 1; page <= MAX_SEARCH_PAGES; page++) {
+            final JSONObject response;
+            try {
+                response = new JSONObject(transport.get(search + page));
+            } catch (org.json.JSONException error) {
+                throw new IOException("TMDB returned invalid JSON", error);
+            }
+            JSONArray results = response.optJSONArray("results");
+            int pages = paginationNumber(response, "total_pages");
+            int count = paginationNumber(response, "total_results");
+            if (results == null || paginationNumber(response, "page") != page
+                    || pages < 0 || pages > MAX_SEARCH_PAGES || count < 0) return null;
+            if (page == 1) {
+                totalPages = pages;
+                totalResults = count;
+                if (count == 0) return null;
+            }
+            // A partial or changing result set cannot establish a unique title.
+            // Never redirect from page one when another page may contain a remake.
+            if (pages != totalPages || count != totalResults || page > totalPages
+                    || results.length() == 0) return null;
+            receivedResults += results.length();
+            if (receivedResults > totalResults
+                    || (page < totalPages && receivedResults >= totalResults)) return null;
+            for (int i = 0; i < results.length(); i++) {
+                JSONObject item = results.optJSONObject(i);
+                if (item == null) return null;
+                String mediaType = item.optString("media_type", "");
+                String titleKey = "movie".equals(mediaType) ? "title" : "name";
+                String dateKey = "movie".equals(mediaType) ? "release_date" : "first_air_date";
+                if ("person".equals(mediaType)) continue;
+                if (!("movie".equals(mediaType) || "tv".equals(mediaType))) return null;
+                Object titleValue = item.opt(titleKey), idValue = item.opt("id");
+                if (!(titleValue instanceof String) || !(idValue instanceof Number)) return null;
+                String title = ((String) titleValue).trim();
+                long id = ((Number) idValue).longValue();
+                if (title.isEmpty() || id <= 0 || ((Number) idValue).doubleValue() != id) return null;
                 String date = item.optString(dateKey, "");
                 candidates.add(new Candidate(title, date.length() >= 4 ? date.substring(0, 4) : "",
                         mediaType, id, item.optDouble("popularity", 0.0)));
             }
+            if (page == totalPages) break;
         }
+        if (receivedResults != totalResults) return null;
         Candidate selected = TitleResultHelper.chooseBest(rawTitle, candidates);
         if (selected == null) return null;
-        String external = get(API + "/" + selected.mediaType + "/" + selected.tmdbId
+        String external = transport.get(API + "/" + selected.mediaType + "/" + selected.tmdbId
                 + "/external_ids?api_key=" + encode(apiKey));
         final String imdb;
         try {
@@ -81,6 +117,14 @@ public final class TmdbClient {
         }
         if (!imdb.matches("tt\\d+")) return null;
         return new TitleMatch(selected.title, selected.year, selected.mediaType, selected.tmdbId, imdb);
+    }
+
+    private static int paginationNumber(JSONObject response, String name) {
+        Object value = response.opt(name);
+        if (!(value instanceof Number)) return -1;
+        double number = ((Number) value).doubleValue();
+        return number >= 0 && number <= Integer.MAX_VALUE && number == Math.rint(number)
+                ? (int) number : -1;
     }
 
     private String get(String address) throws IOException {
