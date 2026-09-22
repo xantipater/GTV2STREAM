@@ -101,27 +101,29 @@ public class TmdbClientRuntimeTest {
         assertEquals(6, bounded.requests.size());
     }
 
-    @Test public void malformedOrMissingPaginationNeverSelectsPartialCandidates() throws Exception {
+    @Test public void malformedOrMissingPaginationFailsWithRetryableError() throws Exception {
         for (String key : Arrays.asList("page", "total_pages", "total_results")) {
             for (Object invalid : new Object[] {JSONObject.NULL, "1", -1, 1.5}) {
                 JSONObject malformed = new JSONObject(page(1, 1, 1, movie("Dune", 1984, 841)));
                 malformed.put(key, invalid);
-                assertRejectedAfterFirstPage(malformed.toString());
+                assertRetryableAfterFirstPage(malformed.toString());
             }
             JSONObject absent = new JSONObject(page(1, 1, 1, movie("Dune", 1984, 841)));
             absent.remove(key);
-            assertRejectedAfterFirstPage(absent.toString());
+            assertRetryableAfterFirstPage(absent.toString());
         }
-        assertRejectedAfterFirstPage(page(1, 0, 1, movie("Dune", 1984, 841)));
-        assertRejectedAfterFirstPage(page(1, 2, 1, movie("Dune", 1984, 841)));
-        assertRejectedAfterFirstPage(page(1, 2, 2));
-        assertRejectedAfterFirstPage("{\"page\":1,\"total_pages\":1,\"total_results\":1}");
+        assertRetryableAfterFirstPage(page(1, 0, 1, movie("Dune", 1984, 841)));
+        assertRetryableAfterFirstPage(page(1, 2, 1, movie("Dune", 1984, 841)));
+        assertRetryableAfterFirstPage(page(1, 2, 2));
+        assertRetryableAfterFirstPage(page(1, 1, 2, movie("Dune", 1984, 841)));
+        assertRetryableAfterFirstPage("{\"page\":1,\"total_pages\":1,\"total_results\":1}");
     }
 
-    @Test public void inconsistentEmptyOrTruncatedLaterPageCannotResolveFirstPageMatch() throws Exception {
+    @Test public void inconsistentEmptyOrTruncatedLaterPageFailsWithRetryableError() throws Exception {
         String first = page(1, 2, 3, movie("Dune", 1984, 841));
         for (String later : Arrays.asList(
                 page(2, 3, 3, movie("Alien", 1979, 348), movie("Aliens", 1986, 679)),
+                page(2, 6, 6, movie("Alien", 1979, 348), movie("Aliens", 1986, 679)),
                 page(2, 2, 4, movie("Alien", 1979, 348), movie("Aliens", 1986, 679)),
                 page(1, 2, 3, movie("Alien", 1979, 348), movie("Aliens", 1986, 679)),
                 page(2, 2, 3),
@@ -130,12 +132,12 @@ public class TmdbClientRuntimeTest {
                         movie("Jaws", 1975, 578)),
                 "{\"page\":2,\"total_pages\":2,\"total_results\":3}")) {
             ScriptedTransport network = new ScriptedTransport(2, first, later);
-            assertNull(new TmdbClient(KEY, network).searchBest("Dune"));
+            assertRetryableSearch(network);
             assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi"), network.paths());
         }
     }
 
-    @Test public void malformedCandidateCannotHideAnotherPotentialMatch() throws Exception {
+    @Test public void malformedCandidateFailsWithRetryableError() throws Exception {
         for (Object bad : new Object[] {JSONObject.NULL, "truncated row",
                 new JSONObject().put("media_type", "movie").put("id", 2),
                 new JSONObject().put("media_type", "movie").put("title", "Dune"),
@@ -146,7 +148,7 @@ public class TmdbClientRuntimeTest {
                 new JSONObject().put("media_type", "unknown").put("title", "Dune").put("id", 2)}) {
             JSONObject response = new JSONObject(page(1, 1, 2, movie("Dune", 1984, 841)));
             response.getJSONArray("results").put(bad);
-            assertRejectedAfterFirstPage(response.toString());
+            assertRetryableAfterFirstPage(response.toString());
         }
         JSONObject person = new JSONObject().put("media_type", "person").put("id", 123).put("name", "Dune");
         ScriptedTransport network = new ScriptedTransport(1,
@@ -205,10 +207,40 @@ public class TmdbClientRuntimeTest {
         }
     }
 
+    @Test public void zeroResultCountWithRowsOrAdditionalPagesIsRetryable() throws Exception {
+        assertRetryableAfterFirstPage(page(1, 0, 0, movie("Dune", 1984, 841)));
+        assertRetryableAfterFirstPage(page(1, 1, 0, movie("Dune", 1984, 841)));
+        assertRetryableAfterFirstPage(page(1, 2, 0));
+    }
+
+    @Test public void completeUnmatchedTitleRemainsAnAuthoritativeMiss() throws Exception {
+        assertRejectedAfterFirstPage(page(1, 1, 1, movie("Alien", 1979, 348)));
+    }
+
     private static void assertRejectedAfterFirstPage(String body) throws Exception {
         ScriptedTransport network = new ScriptedTransport(1, body);
         assertNull(new TmdbClient(KEY, network).searchBest("Dune"));
         assertEquals(Arrays.asList("/3/search/multi"), network.paths());
+    }
+
+    private static void assertRetryableAfterFirstPage(String body) throws Exception {
+        ScriptedTransport network = new ScriptedTransport(1, body);
+        assertRetryableSearch(network);
+        assertEquals(Arrays.asList("/3/search/multi"), network.paths());
+    }
+
+    private static void assertRetryableSearch(ScriptedTransport network) throws Exception {
+        try {
+            new TmdbClient(KEY, network).searchBest("Dune");
+            fail("Incomplete search results must remain retryable, not become a cached miss");
+        } catch (IOException expected) {
+            assertEquals(IOException.class, expected.getClass());
+            assertNotNull(expected.getMessage());
+            assertFalse(expected.getMessage().contains(KEY));
+            assertFalse(expected.getMessage().contains("Dune"));
+            assertFalse(expected.getMessage().contains("truncated row"));
+            assertNull(expected.getCause());
+        }
     }
 
     private static JSONObject movie(String title, int year, long id) throws Exception {

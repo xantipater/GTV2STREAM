@@ -180,6 +180,63 @@ public class StabilisationRuntimeTest {
         assertTrue(service.launched.isEmpty());
     }
 
+    @Test public void lateWhitelistedProviderCancelsProviderlessLookup() throws Exception {
+        whitelist("netflix");
+        blockFirst();
+        click("Alien"); awaitLookup();
+        detail("Alien", "netflix");
+        service.release.countDown(); drain();
+        assertTrue(service.launched.isEmpty());
+        assertTrue(service.messages.isEmpty());
+        assertNull(MatchCache.get("Alien"));
+        assertFalse(MatchCache.isMiss("Alien"));
+        // Retained policy still applies to a later providerless callback.
+        main(() -> field(service, "lastBypassedAt", android.os.SystemClock.elapsedRealtime() - 2001L));
+        detail("Alien", ""); drain();
+        assertEquals(Collections.singletonList("Alien"), service.lookedUp);
+        // A genuine new selection must remain usable.
+        click("Alien", "Watch on Prime Video"); drain();
+        assertEquals(Collections.singletonList("movie:Alien"), service.launched);
+    }
+
+    @Test public void lateWhitelistEvidenceCancelsAlreadyPostedLaunch() throws Exception {
+        whitelist("netflix");
+        blockFirst();
+        click("Alien"); awaitLookup();
+        main(() -> {
+            // Hold the main thread until the worker has posted its launch. The
+            // detail callback then precedes that queued launch deterministically.
+            service.release.countDown();
+            awaitWorker();
+            dispatchDetail("Alien", "netflix");
+        });
+        drain();
+        assertTrue(service.launched.isEmpty());
+        assertEquals(0, service.badges);
+    }
+
+    @Test public void lateProviderEvidenceUsesWhitelistAtCompletion() throws Exception {
+        blockFirst();
+        click("Alien"); awaitLookup();
+        detail("Alien", "netflix");
+        whitelist("netflix");
+        service.release.countDown(); drain();
+        assertTrue(service.launched.isEmpty());
+        assertTrue(service.messages.isEmpty());
+    }
+
+    @Test public void lateWhitelistedProviderSuppressesOldLookupFailure() throws Exception {
+        whitelist("netflix");
+        service.firstFailure = new SocketTimeoutException("synthetic timeout");
+        blockFirst();
+        click("Alien"); awaitLookup();
+        detail("Alien", "netflix");
+        service.release.countDown(); drain();
+        assertTrue(service.launched.isEmpty());
+        assertTrue(service.messages.isEmpty());
+        assertFalse(MatchCache.isMiss("Alien"));
+    }
+
     @Test public void failedYoutubeLaunchCannotReplayAfterDuplicateWindow() throws Exception {
         service.youtubeSuccess = false;
         click("Big Buck Bunny", "Watch on YouTube"); drain();
@@ -265,6 +322,94 @@ public class StabilisationRuntimeTest {
         assertEquals(Collections.singletonList("movie:Dune"), service.launched);
         assertNull(MatchCache.get("Dune (1984)"));
         assertNotNull(MatchCache.get("Dune (2021)"));
+    }
+
+    @Test public void explicitDetailYearSupersedesBareLookupInsideDuplicateWindow() throws Exception {
+        assertRefinedYearSupersedesBareLookup(false);
+    }
+
+    @Test public void explicitDetailYearSupersedesBareLookupAfterDuplicateWindow() throws Exception {
+        assertRefinedYearSupersedesBareLookup(true);
+    }
+
+    @Test public void explicitDetailYearSuppressesOldFailureAndStillLaunches() throws Exception {
+        service.firstFailure = new SocketTimeoutException("synthetic stale timeout");
+        assertRefinedYearSupersedesBareLookup(false);
+    }
+
+    @Test public void explicitDetailYearDoesNotCacheOldAmbiguousMiss() throws Exception {
+        service.firstNoMatch = true;
+        assertRefinedYearSupersedesBareLookup(false);
+    }
+
+    @Test public void explicitDetailYearCancelsAlreadyPostedBareLaunch() throws Exception {
+        blockFirst();
+        click("Dune", "Watch on Netflix"); awaitLookup();
+        main(() -> {
+            service.release.countDown();
+            awaitWorker();
+            dispatchDetail("Dune (1984)", "");
+        });
+        drain();
+        assertEquals(Arrays.asList("Dune", "Dune (1984)"), service.lookedUp);
+        assertEquals(Collections.singletonList("movie:Dune"), service.launched);
+        assertEquals(Collections.singletonList("1984"), service.launchedYears);
+        assertTrue(service.messages.isEmpty());
+    }
+
+    private void assertRefinedYearSupersedesBareLookup(boolean afterDuplicateWindow) throws Exception {
+        blockFirst();
+        click("Dune", "Watch on Netflix"); awaitLookup();
+        if (afterDuplicateWindow) {
+            main(() -> field(service, "lastDispatchedAt", android.os.SystemClock.elapsedRealtime() - 2001L));
+        }
+        detail("Dune (1984)", "");
+        service.release.countDown(); drain();
+        assertEquals(Arrays.asList("Dune", "Dune (1984)"), service.lookedUp);
+        assertEquals(Collections.singletonList("movie:Dune"), service.launched);
+        assertEquals(Collections.singletonList("1984"), service.launchedYears);
+        assertNull(MatchCache.get("Dune"));
+        assertFalse(MatchCache.isMiss("Dune"));
+        assertNotNull(MatchCache.get("Dune (1984)"));
+        assertTrue(service.messages.isEmpty());
+    }
+
+    @Test public void inconsistentTmdbPagesRemainRetryableOnNextSelection() throws Exception {
+        final List<String> requests = Collections.synchronizedList(new ArrayList<>());
+        final String row = "{\"media_type\":\"movie\",\"id\":841,\"title\":\"Dune\","
+                + "\"release_date\":\"1984-01-01\"}";
+        service.lookupClient = new TmdbClient("synthetic-test-key-not-a-credential", address -> {
+            requests.add(address);
+            switch (requests.size()) {
+                case 1:
+                    assertTrue(address.contains("/search/multi?"));
+                    assertTrue(address.endsWith("&page=1"));
+                    return "{\"page\":1,\"total_pages\":2,\"total_results\":3,\"results\":[" + row + "]}";
+                case 2:
+                    assertTrue(address.contains("/search/multi?"));
+                    assertTrue(address.endsWith("&page=2"));
+                    return "{\"page\":2,\"total_pages\":2,\"total_results\":4,\"results\":[" + row + "]}";
+                case 3:
+                    assertTrue(address.contains("/search/multi?"));
+                    assertTrue(address.endsWith("&page=1"));
+                    return "{\"page\":1,\"total_pages\":1,\"total_results\":1,\"results\":[" + row + "]}";
+                case 4:
+                    assertTrue(address.contains("/movie/841/external_ids?"));
+                    return "{\"imdb_id\":\"tt0087182\"}";
+                default: throw new AssertionError("Unexpected TMDB request");
+            }
+        });
+        click("Dune", "Watch on Netflix"); drain();
+        assertTrue(service.launched.isEmpty());
+        assertEquals(Collections.singletonList(R.string.status_lookup_failed), service.messages);
+        assertFalse(MatchCache.isMiss("Dune"));
+        assertNull(MatchCache.get("Dune"));
+        click("Dune", "Watch on Netflix"); drain();
+        assertEquals(Arrays.asList("Dune", "Dune"), service.lookedUp);
+        assertEquals(4, requests.size());
+        assertEquals(Collections.singletonList("movie:Dune"), service.launched);
+        assertEquals(Collections.singletonList("1984"), service.launchedYears);
+        assertNotNull(MatchCache.get("Dune"));
     }
 
     @Test public void explicitYearSurvivesEventDescriptionEnrichmentAndLookup() throws Exception {
@@ -579,6 +724,17 @@ public class StabilisationRuntimeTest {
     private void main(Runnable action) { instrumentation.runOnMainSync(action); }
     private void click(String... text) { deliver(AccessibilityEvent.TYPE_VIEW_CLICKED, HOME, text); }
     private void focus(String... text) { deliver(AccessibilityEvent.TYPE_VIEW_FOCUSED, HOME, text); }
+    // The unbound service fixture cannot expose a live entity title tree. Enter
+    // its actual detail dispatch after extraction, as the earlier detail tests do.
+    private void detail(String title, String provider) { main(() -> dispatchDetail(title, provider)); }
+    private void dispatchDetail(String title, String provider) {
+        invoke(service, "dispatchTitle", new Class<?>[] {String.class, boolean.class, String.class},
+                title, false, provider);
+    }
+    private void awaitWorker() {
+        try { worker().submit(() -> {}).get(5, TimeUnit.SECONDS); }
+        catch (Exception error) { throw new AssertionError(error); }
+    }
     private void stockYoutube() { window(YOUTUBE, "youtube.Activity"); }
     private void window(String pkg, String className) {
         main(() -> {
@@ -633,12 +789,16 @@ public class StabilisationRuntimeTest {
 
     private static class TestService extends TvRecommendationService {
         final List<String> launched = Collections.synchronizedList(new ArrayList<>());
+        final List<String> launchedYears = Collections.synchronizedList(new ArrayList<>());
         final List<String> lookedUp = Collections.synchronizedList(new ArrayList<>());
         final List<Integer> messages = Collections.synchronizedList(new ArrayList<>());
         final CountDownLatch entered = new CountDownLatch(1);
         final CountDownLatch release = new CountDownLatch(1);
         volatile boolean blockFirst, noMatch;
+        volatile boolean firstNoMatch;
         volatile IOException failure;
+        volatile IOException firstFailure;
+        volatile TmdbClient lookupClient;
         boolean youtubeSuccess = true;
         int badges;
         AccessibilityNodeInfo root;
@@ -655,12 +815,16 @@ public class StabilisationRuntimeTest {
                     catch (InterruptedException ignored) { /* prove stale completion cannot launch */ }
                 }
             }
+            if (lookedUp.size() == 1 && firstFailure != null) throw firstFailure;
+            if (lookedUp.size() == 1 && firstNoMatch) return null;
             if (failure != null) throw failure;
+            if (lookupClient != null) return lookupClient.searchBest(title);
             return noMatch ? null : new TitleMatch(TitleResultHelper.cleanTitle(title),
                     TitleResultHelper.extractYear(title), "movie", 1, "tt1234567");
         }
         @Override boolean openMoviesTarget(String target, TitleMatch match) {
             assertSame(Looper.getMainLooper(), Looper.myLooper());
+            launchedYears.add(match.year);
             launched.add("movie:" + match.title); return true;
         }
         @Override boolean openYouTubeTarget(String title) {
