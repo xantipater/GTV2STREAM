@@ -32,7 +32,7 @@ public final class DispatchPolicy {
         if (windowMs <= 0) return false;
         long elapsed = now - bypassedAt;
         if (elapsed < 0 || elapsed >= windowMs) return false;
-        return TitleResultHelper.normalizedTitleMatches(bypassedTitle, candidateTitle);
+        return TitleResultHelper.compatibleTitles(bypassedTitle, candidateTitle);
     }
 
     /**
@@ -54,7 +54,7 @@ public final class DispatchPolicy {
         if (windowMs <= 0) return "";
         long elapsed = now - focusedAt;
         if (elapsed < 0 || elapsed >= windowMs) return "";
-        if (!TitleResultHelper.normalizedTitleMatches(focusedTitle, detailTitle)) return "";
+        if (!TitleResultHelper.compatibleTitles(focusedTitle, detailTitle)) return "";
         return focusedProvider.trim();
     }
 }

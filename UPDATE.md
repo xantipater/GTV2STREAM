@@ -4,20 +4,34 @@ This guide covers how to update GTV2STREAM when a newer version is released. The
 are two routes: the built-in update prompt in the app, or the ADB sideload you
 already used to install it.
 
-**Updating keeps your settings and your TMDB key.** Both routes install over the
-existing app rather than replacing it, so you do not need to re-enter anything or
-re-enable the accessibility service.
+**A compatible in-place update keeps your settings and your TMDB key.** Both
+routes install over the
+existing app. Confirm that the accessibility service reconnects afterward;
+OEM restrictions may require the setup steps below again.
 
 Current release: **v1.2.0**. Previous release: v1.1.0. Full version history:
 [CHANGELOG](CHANGELOG.md).
 
-## Route 1: update from inside the app (recommended)
+## Existing v1.2.0 installations: use ADB for the first fixed update
+
+The published v1.2.0 updater incorrectly rejects files smaller than 102,400 bytes;
+the project's v1.2.0 release APK is 66,425 bytes. An error does not necessarily mean
+the next release is corrupt. The installed validator cannot be repaired by a small
+APK it refuses to hand to Android. Use **Route 2 (ADB)** for the first maintenance
+release containing the correction, then use its fixed in-app updater thereafter.
+Do not uninstall merely to work around this size check: a compatible `adb install -r`
+keeps settings. v1.1 has no in-app updater and also needs ADB.
+
+These fixes are currently **unreleased**; the published version is still v1.2.0.
+No future release filename or signing compatibility is assumed here.
+
+## Route 1: update from inside a build containing the updater fix
 
 1. Open **GTV2STREAM** on the TV.
 2. If a newer version exists, a prompt appears: **Update available: GTV2STREAM
-   1.2.0**, with three choices:
+   [new version]**, with three choices:
 
-   - **Download & install 1.2.0** — downloads the release APK and hands it to the
+   - **Download & install [new version]** — downloads the release APK and hands it to the
      Android installer.
    - **Open release page** — opens the GitHub release page in the TV browser so
      you can download it yourself.
@@ -61,8 +75,10 @@ Allow from this source**.
 - **The prompt appears once per release.** Tapping **Later** silences it for that
   version instead of asking again every time you open the app.
 - **The download is verified** before the installer sees it: the file size is
-  checked against the release metadata, and the file has to be a valid APK
-  archive. A file that fails either check is discarded, not installed.
+  checked against the release metadata when available. The ZIP entries and CRCs
+  are checked with bounded reads; Android package metadata must identify a newer
+  GTV2STREAM build matching the release version. Android separately verifies its
+  signature and compatibility at installation. A file that fails either check is discarded, not installed.
 - **A cancelled or failed install changes nothing.** GTV2STREAM reports
   **Installation cancelled** or **Installation failed** and leaves your installed
   version exactly as it was.
@@ -91,16 +107,18 @@ are updating a TV that has no easy way to reach Android settings.
    your TMDB key:
 
    ```text
-   adb install -r GTV2STREAM-v1.2.0.apk
+   adb install -r "NEW_RELEASE.apk"
    ```
 
-   Wait for `Success`.
+   Replace `NEW_RELEASE.apk` with the exact filename you downloaded, then wait
+   for `Success`. For the small-APK recovery above, use the maintenance release
+   containing the fix when it is published; reinstalling v1.2.0 does not fix its updater.
 
 5. On TCL TVs, re-apply the vendor auto-start permission if the service does not
    reconnect on its own:
 
    ```text
-   appops set com.gtv2stream AUTO_START allow
+   adb shell appops set com.gtv2stream AUTO_START allow
    ```
 
 6. Open GTV2STREAM and confirm the service status says **Enabled — Ready**.
@@ -113,9 +131,10 @@ are updating a TV that has no easy way to reach Android settings.
 3. Test both targets with the test buttons, then test one real
    recommendation card on the Google TV home screen.
 
-Your targets, provider whitelist toggles, badge setting and TMDB key all carry
-over. If you want to confirm the key survived, a movie card that redirects in
-under a second is proof: the lookup needs the key.
+Your targets, provider whitelist toggles, badge setting and TMDB key carry over
+on a compatible in-place update. Test an uncached movie recommendation to exercise
+the real TMDB lookup; launch speed and the direct test button do not prove that
+the key works.
 
 ## Troubleshooting
 
@@ -132,21 +151,22 @@ release does exist and you have already dismissed the prompt once for it, the
 
 The APK you are installing was not signed with the same key as the version on the
 TV, so Android refuses to update it in place. This happens if you built the app
-yourself instead of using a release APK. Uninstall GTV2STREAM and install the
-release fresh, then re-enter your TMDB key and re-enable the accessibility
-service.
+yourself instead of using a release APK. Obtain an APK signed by the signer of
+the installed build. Do not uninstall
+as an in-place recovery: that deletes local settings and the TMDB key, and a
+fresh installation requires accessibility setup again.
 
 ### `INSTALL_FAILED_VERSION_DOWNGRADE`
 
 You are installing an older APK than the version already on the TV. Download the
-newest release instead. If you specifically need to go backwards, uninstall first.
+newest compatible release instead. A downgrade that requires uninstalling loses
+local settings; it is outside this in-place update procedure.
 
 ### The download fails or times out
 
-The messages are specific: **You appear to be offline** means the TV has no
-network connection, **Download failed** means the connection dropped, **Download
+The messages are specific: **You appear to be offline** usually means name resolution failed, **Download failed** means a network operation failed, **Download
 timed out** means the transfer stalled, and **Download verification failed**
-means the file arrived damaged or was not a valid APK. Nothing is installed in any
+means the file failed size, ZIP, package or version validation. Nothing is installed in any
 of those cases. Check the TV's connection and try again.
 
 ### The service is enabled but nothing redirects

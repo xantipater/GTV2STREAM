@@ -18,23 +18,36 @@ public final class UpdateInstallReceiver extends BroadcastReceiver {
 
     @Override public void onReceive(Context context, Intent intent) {
         if (intent == null || !ACTION_STATUS.equals(intent.getAction())) return;
+        int sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1);
+        if (sessionId < 0 || sessionId != UpdateInstallState.session(context)) return;
         int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+            if (confirm == null) {
+                abandon(context, sessionId);
+                ApkUpdater.onInstallResult(context, sessionId, PackageInstaller.STATUS_FAILURE, "confirm missing");
+                return;
+            }
             if (confirm != null) {
                 try {
                     confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     context.startActivity(confirm);
                 } catch (Exception error) {
-                    Log.w("GTV2STREAM", "Update confirmation UI unavailable: " + error.getMessage());
-                    ApkUpdater.onInstallResult(PackageInstaller.STATUS_FAILURE, "confirm unavailable");
+                    Log.w("GTV2STREAM", "Update confirmation UI unavailable");
+                    abandon(context, sessionId);
+                    ApkUpdater.onInstallResult(context, sessionId, PackageInstaller.STATUS_FAILURE, "confirm unavailable");
                     return;
                 }
             }
-            ApkUpdater.onInstallResult(status, null);
+            ApkUpdater.onInstallResult(context, sessionId, status, null);
             return;
         }
-        ApkUpdater.onInstallResult(status,
+        ApkUpdater.onInstallResult(context, sessionId, status,
                 intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE));
+    }
+
+    private static void abandon(Context context, int sessionId) {
+        try { context.getPackageManager().getPackageInstaller().abandonSession(sessionId); }
+        catch (RuntimeException ignored) { }
     }
 }

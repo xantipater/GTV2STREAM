@@ -4,6 +4,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInstaller;
+import android.content.pm.PackageInfo;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -57,6 +58,10 @@ final class ApkUpdater {
     }
     private static volatile Listener pendingListener;
     private static volatile DownloadHandle active;
+    /** Identity check for queued callbacks from a cancelled/replaced download. */
+    private static volatile DownloadHandle latest;
+    /** Session owned by this process during the final installer handoff. */
+    private static int handoffSession = -1;
 
     interface Listener {
         void onProgress(long downloadedBytes, long totalBytes);
@@ -70,6 +75,8 @@ final class ApkUpdater {
     /** Cancels an in-flight download; the partial file is deleted. */
     static final class DownloadHandle {
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        // Guarded by ApkUpdater.class; claimed handoffs can only be cancelled in Android's UI.
+        private boolean handedOff;
         void cancel() { cancelled.set(true); }
         boolean isCancelled() { return cancelled.get(); }
     }
@@ -105,9 +112,22 @@ final class ApkUpdater {
      */
     static synchronized DownloadHandle startUpdate(Context context, UpdateChecker.UpdateInfo info,
             Listener listener) {
+        if (isInstallPending(context)) {
+            pendingListener = listener;
+            main().post(() -> {
+                if (pendingListener == listener && isInstallPending(context)) listener.onInstallPrompt();
+            });
+            DownloadHandle pending = new DownloadHandle();
+            pending.handedOff = true;
+            return pending;
+        }
+        // A retry owns a new operation; delayed preference notifications must
+        // not resurrect the previous installer's terminal outcome.
+        UpdateInstallState.clear(context);
         cancelActive();
         final DownloadHandle handle = new DownloadHandle();
         active = handle;
+        latest = handle;
         pendingListener = listener;
         final Context appContext = context.getApplicationContext();
         if (info == null || info.apkUrl == null) {
@@ -122,36 +142,68 @@ final class ApkUpdater {
     }
 
     static synchronized void cancelActive() {
-        if (active != null) active.cancel();
-        active = null;
+        cancel(active);
     }
 
-    /** Called by {@link UpdateInstallReceiver} with the system's install-session result. */
-    static void onInstallResult(int status, String message) {
+    /** An older Activity must never cancel a newer Activity's transfer. */
+    static synchronized boolean cancel(DownloadHandle handle) {
+        if (handle == null) return true;
+        if (handle.handedOff) return false;
+        handle.cancel();
+        if (active == handle) active = null;
+        return true;
+    }
+
+    static synchronized boolean isHandoffInProgress() { return handoffSession >= 0; }
+
+    static synchronized boolean isHandoffInProgress(int sessionId) {
+        return sessionId >= 0 && handoffSession == sessionId;
+    }
+
+    static synchronized void releaseHandoff(int sessionId) {
+        if (handoffSession == sessionId) handoffSession = -1;
+    }
+
+    private static boolean isInstallPending(Context context) {
+        return isHandoffInProgress()
+                || UpdateInstallState.status(context) == PackageInstaller.STATUS_PENDING_USER_ACTION;
+    }
+
+    /** Settings may be destroyed while the system installer is still running. */
+    static synchronized void detachListener(Listener listener) {
+        if (pendingListener == listener) pendingListener = null;
+    }
+
+    /** Durable result first, optional UI second; stale/foreign sessions are ignored. */
+    static void onInstallResult(Context context, int sessionId, int status, String message) {
+        if (!UpdateInstallState.record(context, sessionId, status)) return;
         final Listener listener = pendingListener;
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) return;
+        synchronized (ApkUpdater.class) { active = null; }
         if (listener == null) return;
-        pendingListener = null;
-        active = null;
-        switch (status) {
-            case PackageInstaller.STATUS_SUCCESS:
-                main().post(listener::onInstalled);
-                break;
-            case PackageInstaller.STATUS_FAILURE_ABORTED:
-                main().post(() -> listener.onFailure(UpdateChecker.Failure.INSTALL_CANCELLED));
-                break;
-            case PackageInstaller.STATUS_FAILURE_BLOCKED:
-                main().post(() -> listener.onFailure(UpdateChecker.Failure.UNKNOWN_SOURCES));
-                break;
-            case PackageInstaller.STATUS_PENDING_USER_ACTION:
-                // The receiver launches the system confirmation activity itself;
-                // the final result arrives here afterwards.
-                pendingListener = listener;
-                break;
-            default:
-                Log.w(TAG, "Update install failed: " + message);
-                main().post(() -> listener.onFailure(UpdateChecker.Failure.INSTALL_FAILED));
-                break;
-        }
+        main().post(() -> {
+            // The Activity can be destroyed or a retry can take ownership while
+            // this result waits on the main queue. The durable outcome survives
+            // either event; only the currently attached UI may receive it.
+            synchronized (ApkUpdater.class) {
+                if (pendingListener != listener) return;
+                pendingListener = null;
+            }
+            switch (status) {
+                case PackageInstaller.STATUS_SUCCESS:
+                    listener.onInstalled();
+                    break;
+                case PackageInstaller.STATUS_FAILURE_ABORTED:
+                    listener.onFailure(UpdateChecker.Failure.INSTALL_CANCELLED);
+                    break;
+                case PackageInstaller.STATUS_FAILURE_BLOCKED:
+                    listener.onFailure(UpdateChecker.Failure.UNKNOWN_SOURCES);
+                    break;
+                default:
+                    listener.onFailure(UpdateChecker.Failure.INSTALL_FAILED);
+                    break;
+            }
+        });
     }
 
     private static void runDownload(Context context, UpdateChecker.UpdateInfo info,
@@ -164,6 +216,10 @@ final class ApkUpdater {
         // The same check after the download stays as the final guard.
         if (!canInstallUnknownApps(context)) {
             postFailure(handle, listener, UpdateChecker.Failure.UNKNOWN_SOURCES);
+            return;
+        }
+        if (info.apkSize > ApkArchive.MAX_DOWNLOAD_BYTES) {
+            postFailure(handle, listener, UpdateChecker.Failure.CORRUPT);
             return;
         }
         HttpURLConnection connection = null;
@@ -190,6 +246,12 @@ final class ApkUpdater {
                         postCancelled(handle, listener);
                         return;
                     }
+                    if (downloaded + read > ApkArchive.MAX_DOWNLOAD_BYTES
+                            || (info.apkSize >= 0 && downloaded + read > info.apkSize)) {
+                        deleteQuietly(apk);
+                        postFailure(handle, listener, UpdateChecker.Failure.CORRUPT);
+                        return;
+                    }
                     out.write(buffer, 0, read);
                     downloaded += read;
                     if (downloaded - lastPosted >= 256 * 1024L) {
@@ -205,7 +267,8 @@ final class ApkUpdater {
                 postCancelled(handle, listener);
                 return;
             }
-            if (!UpdateChecker.isValidApkDownload(apk, info.apkSize)) {
+            if (!UpdateChecker.isValidApkDownload(apk, info.apkSize)
+                    || !isOwnNewerPackage(context, apk, info.version)) {
                 deleteQuietly(apk);
                 postFailure(handle, listener, UpdateChecker.Failure.CORRUPT);
                 return;
@@ -215,7 +278,8 @@ final class ApkUpdater {
                 postFailure(handle, listener, UpdateChecker.Failure.UNKNOWN_SOURCES);
                 return;
             }
-            commitInstall(context, apk, handle, listener);
+            finishInstallerHandoff(apk, handle, listener,
+                    () -> commitInstall(context, apk, info.version, handle, listener));
         } catch (SocketTimeoutException timeout) {
             deleteQuietly(apk);
             postFailure(handle, listener, UpdateChecker.Failure.TIMEOUT);
@@ -224,7 +288,7 @@ final class ApkUpdater {
             postFailure(handle, listener, looksOffline(network)
                     ? UpdateChecker.Failure.OFFLINE : UpdateChecker.Failure.NETWORK);
         } catch (Exception error) {
-            Log.w(TAG, "Update failed: " + error.getMessage());
+            Log.w(TAG, "Update operation failed");
             deleteQuietly(apk);
             postFailure(handle, listener, UpdateChecker.Failure.NETWORK);
         } finally {
@@ -246,7 +310,13 @@ final class ApkUpdater {
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
             connection.setReadTimeout(READ_TIMEOUT_MS);
             connection.setRequestProperty("Accept", "application/vnd.github+json, application/octet-stream");
-            int code = connection.getResponseCode();
+            int code;
+            try {
+                code = connection.getResponseCode();
+            } catch (IOException error) {
+                connection.disconnect();
+                throw error;
+            }
             if (code == HttpURLConnection.HTTP_MOVED_PERM
                     || code == HttpURLConnection.HTTP_MOVED_TEMP
                     || code == HttpURLConnection.HTTP_SEE_OTHER
@@ -254,7 +324,7 @@ final class ApkUpdater {
                 String next = connection.getHeaderField("Location");
                 connection.disconnect();
                 if (next == null) return null;
-                current = next;
+                current = new URL(new URL(current), next).toExternalForm();
                 continue;
             }
             return connection;
@@ -262,23 +332,48 @@ final class ApkUpdater {
         return null;
     }
 
-    /** Seed URL plus redirect targets must be https GitHub release hosts. */
+    /** HTTPS GitHub release hosts only, with no user-info or alternate port. */
     static boolean isAllowedDownloadUrl(String url) {
-        if (url == null || !url.startsWith("https://")) return false;
-        String host = url.substring("https://".length());
-        int slash = host.indexOf('/');
-        host = (slash < 0 ? host : host.substring(0, slash)).toLowerCase(Locale.US);
-        return host.equals("github.com")
-                || host.endsWith(".githubusercontent.com")
-                || host.equals("githubusercontent.com");
+        if (url == null) return false;
+        try {
+            java.net.URI parsed = new java.net.URI(url);
+            if (!"https".equalsIgnoreCase(parsed.getScheme()) || parsed.getUserInfo() != null
+                    || (parsed.getPort() != -1 && parsed.getPort() != 443)) return false;
+            String host = parsed.getHost();
+            return "github.com".equalsIgnoreCase(host)
+                    || "objects.githubusercontent.com".equalsIgnoreCase(host)
+                    || "release-assets.githubusercontent.com".equalsIgnoreCase(host);
+        } catch (java.net.URISyntaxException invalid) {
+            return false;
+        }
     }
 
-    private static void commitInstall(Context context, File apk, DownloadHandle handle,
+    /** Package parsing is real Android validation; signing compatibility remains the installer's job. */
+    static boolean isOwnNewerPackage(Context context, File apk, String expectedVersion) {
+        try {
+            PackageInfo archive = context.getPackageManager().getPackageArchiveInfo(apk.getPath(), 0);
+            PackageInfo installed = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+            if (archive == null || !context.getPackageName().equals(archive.packageName)
+                    || !UpdateChecker.isInstalledAtLeast(expectedVersion, archive.versionName)
+                    || UpdateChecker.compareVersions(expectedVersion, archive.versionName) != 0) return false;
+            long candidateCode = Build.VERSION.SDK_INT >= 28 ? archive.getLongVersionCode() : archive.versionCode;
+            long installedCode = Build.VERSION.SDK_INT >= 28 ? installed.getLongVersionCode() : installed.versionCode;
+            return candidateCode > installedCode;
+        } catch (Exception invalid) {
+            return false;
+        }
+    }
+
+    private static void commitInstall(Context context, File apk, String version, DownloadHandle handle,
             Listener listener) throws IOException {
         PackageInstaller installer = context.getPackageManager().getPackageInstaller();
         PackageInstaller.SessionParams params =
                 new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
         params.setAppPackageName(context.getPackageName());
+        params.setSize(apk.length());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED);
+        }
         int sessionId = installer.createSession(params);
         try (PackageInstaller.Session session = installer.openSession(sessionId);
              InputStream in = new FileInputStream(apk)) {
@@ -305,19 +400,74 @@ final class ApkUpdater {
                 postFailure(handle, listener, UpdateChecker.Failure.CORRUPT);
                 return;
             }
+            if (handle.isCancelled()) {
+                session.abandon();
+                deleteQuietly(apk);
+                postCancelled(handle, listener);
+                return;
+            }
             Intent result = new Intent(context, UpdateInstallReceiver.class)
-                    .setAction(UpdateInstallReceiver.ACTION_STATUS);
+                    .setAction(UpdateInstallReceiver.ACTION_STATUS)
+                    .putExtra(PackageInstaller.EXTRA_SESSION_ID, sessionId);
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags |= PendingIntent.FLAG_MUTABLE;
             PendingIntent pending = PendingIntent.getBroadcast(context, sessionId, result, flags);
             // Committing hands control to the system installer UI; the user must
             // still confirm before anything is installed. Nothing is silent here.
-            session.commit(pending.getIntentSender());
+            if (!handoffInstall(context, sessionId, version, handle,
+                    () -> session.commit(pending.getIntentSender()))) {
+                session.abandon();
+                deleteQuietly(apk);
+                postCancelled(handle, listener);
+                return;
+            }
+            synchronized (ApkUpdater.class) { if (active == handle) active = null; }
             deleteQuietly(apk);
-            main().post(() -> { if (!handle.isCancelled()) listener.onInstallPrompt(); });
+            main().post(() -> {
+                if (latest == handle && !handle.isCancelled() && pendingListener == listener
+                        && isInstallPending(context)) {
+                    listener.onInstallPrompt();
+                }
+            });
         } catch (IOException | RuntimeException error) {
             try { installer.abandonSession(sessionId); } catch (Exception ignored) { }
+            UpdateInstallState.record(context, sessionId, PackageInstaller.STATUS_FAILURE);
             throw error instanceof IOException ? (IOException) error : new IOException(error);
+        }
+    }
+
+    /** Installer/session failures are local handoff failures, not transport failures. */
+    static void finishInstallerHandoff(File apk, DownloadHandle handle, Listener listener,
+            InstallOperation install) {
+        try {
+            install.run();
+        } catch (IOException | RuntimeException failure) {
+            deleteQuietly(apk);
+            postFailure(handle, listener, UpdateChecker.Failure.INSTALL_FAILED);
+        }
+    }
+
+    interface InstallOperation { void run() throws IOException; }
+
+    /** Final handoff boundary; tests replace only the system commit operation. */
+    static boolean handoffInstall(Context context, int sessionId, String version,
+            DownloadHandle handle, Runnable commit) throws IOException {
+        synchronized (ApkUpdater.class) {
+            if (active != handle || latest != handle || handle.isCancelled() || handoffSession >= 0) return false;
+            handle.handedOff = true;
+            handoffSession = sessionId;
+            active = null;
+        }
+        // Never hold the updater monitor during disk or installer IPC: cancel and
+        // Settings may run on the main thread while this worker persists/commits.
+        try {
+            if (!UpdateInstallState.begin(context, sessionId, version)) {
+                throw new IOException("Cannot persist install session");
+            }
+            commit.run();
+            return true;
+        } finally {
+            releaseHandoff(sessionId);
         }
     }
 
@@ -345,7 +495,7 @@ final class ApkUpdater {
 
     private static void postProgress(DownloadHandle handle, Listener listener,
             long downloaded, long total) {
-        main().post(() -> { if (!handle.isCancelled()) listener.onProgress(downloaded, total); });
+        main().post(() -> { if (latest == handle && !handle.isCancelled()) listener.onProgress(downloaded, total); });
     }
 
     private static void postFailure(DownloadHandle handle, Listener listener,
@@ -354,7 +504,9 @@ final class ApkUpdater {
             if (active == handle) active = null;
             if (pendingListener == listener) pendingListener = null;
         }
-        main().post(() -> listener.onFailure(failure));
+        main().post(() -> {
+            if (latest == handle && !handle.isCancelled()) listener.onFailure(failure);
+        });
     }
 
     private static void postCancelled(DownloadHandle handle, Listener listener) {
@@ -362,6 +514,6 @@ final class ApkUpdater {
             if (active == handle) active = null;
             if (pendingListener == listener) pendingListener = null;
         }
-        main().post(listener::onCancelled);
+        main().post(() -> { if (latest == handle) listener.onCancelled(); });
     }
 }

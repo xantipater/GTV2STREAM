@@ -4,7 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Tiny LRU cache of recent TMDB matches, keyed by normalized title. Clicking the
+ * Tiny LRU cache of recent TMDB matches, keyed by normalized title and explicit year. Clicking the
  * same card again within the TTL (retrying a failed launch, coming back after
  * closing the target app) skips the network lookup entirely and launches from
  * the cached result. Titles with no match are cached separately with a short
@@ -34,7 +34,7 @@ public final class MatchCache {
 
     /** Returns the cached match for the title, or null when absent or expired. */
     public static synchronized TitleMatch get(String title) {
-        String key = TitleResultHelper.normalizedTitle(title);
+        String key = TitleResultHelper.matchKey(title);
         if (key.isEmpty()) return null;
         Entry entry = CACHE.get(key);
         if (entry == null) return null;
@@ -47,7 +47,7 @@ public final class MatchCache {
 
     public static synchronized void put(String title, TitleMatch match) {
         if (title == null || match == null) return;
-        String key = TitleResultHelper.normalizedTitle(title);
+        String key = TitleResultHelper.matchKey(title);
         if (key.isEmpty()) return;
         CACHE.put(key, new Entry(match, System.currentTimeMillis()));
         MISSES.remove(key);
@@ -58,7 +58,7 @@ public final class MatchCache {
 
     /** Returns true when the title recently resolved to no TMDB match. */
     public static synchronized boolean isMiss(String title) {
-        String key = TitleResultHelper.normalizedTitle(title);
+        String key = TitleResultHelper.matchKey(title);
         if (key.isEmpty()) return false;
         Long storedAt = MISSES.get(key);
         if (storedAt == null) return false;
@@ -76,9 +76,9 @@ public final class MatchCache {
      */
     public static synchronized void putMiss(String title) {
         if (title == null) return;
-        String key = TitleResultHelper.normalizedTitle(title);
+        String key = TitleResultHelper.matchKey(title);
         if (key.isEmpty()) return;
-        if (CACHE.containsKey(key)) return;
+        if (get(title) != null) return;
         MISSES.put(key, System.currentTimeMillis());
         while (MISSES.size() > MAX_MISS_ENTRIES) {
             java.util.Iterator<String> oldest = MISSES.keySet().iterator();

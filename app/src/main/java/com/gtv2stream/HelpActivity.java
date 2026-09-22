@@ -47,10 +47,10 @@ public final class HelpActivity extends Activity {
         root.addView(body(getString(R.string.help_connect_pair_2), 0, 8));
         root.addView(command("adb connect TV_IP:CONNECTION_PORT", 0, 12));
         root.addView(body(getString(R.string.help_install), 0, 8));
-        root.addView(command("adb install -r GTV2STREAM-v1.0.0.apk", 0, 14));
+        root.addView(command("adb install -r GTV2STREAM-v1.2.0.apk", 0, 14));
 
         root.addView(body(getString(R.string.help_autostart), 0, 8));
-        root.addView(command("appops set com.gtv2stream AUTO_START allow", 0, 14));
+        root.addView(command("adb shell appops set com.gtv2stream AUTO_START allow", 0, 14));
 
         root.addView(body(getString(R.string.help_configure), 0, 14));
         root.addView(body(getString(R.string.help_finish), 0, 18));

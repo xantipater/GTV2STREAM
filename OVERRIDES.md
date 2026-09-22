@@ -27,3 +27,17 @@
   It is called twice on the YouTube path only, once before the redirect (the launcher's copy is still
   backgrounded then, so its own launch has to cold-start) and once after, and never on the
   movie/series path. No force-stop, no `FORCE_STOP_PACKAGES`, no silent install, no other permission.
+
+## 2026-09-18 — review stabilisation supersedes the background-kill workaround
+
+The user authorised implementation of the independent review's confirmed fixes.
+`KILL_BACKGROUND_PROCESSES` and the cross-app calls are removed. Android 14 permits
+only killing the caller's own background processes; a successful redirect never
+proved that stock YouTube was killed. Older-platform process killing is not needed
+for the explicit launch plus one guarded reassert strategy either.
+
+No new production permission or signing credential is introduced. Test-only
+AndroidX runner/JUnit dependencies permit real Android framework tests. Release
+builds remain unsigned in CI; publishing and same-key upgrade approval stay manual.
+
+Platform reference: https://developer.android.com/about/versions/14/behavior-changes-all#kill-background-processes

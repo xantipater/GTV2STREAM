@@ -176,29 +176,29 @@ final class LaunchSupport {
             }
             try {
                 context.startActivity(launch);
-                Log.i(TAG, logLabel + " explicit launch: "
+                Diagnostics.debug(logLabel + " explicit launch: "
                         + (target != null ? target.component.flattenToShortString() : "generic"));
                 return true;
             } catch (ActivityNotFoundException | SecurityException explicitError) {
                 // Some handlers resolve during probing but reject the explicit
                 // component at launch. Retry the same URI without repeating the
                 // stop/delay, constrained to the target package when provided.
-                Log.w(TAG, logLabel + " explicit launch failed; retrying: "
+                Diagnostics.debug(logLabel + " explicit launch failed; retrying: "
                         + explicitError.getMessage());
                 Intent fallback = new Intent(action, Uri.parse(uri)).addFlags(flags);
                 if (fallbackPackage != null) fallback.setPackage(fallbackPackage);
                 try {
                     context.startActivity(fallback);
-                    Log.i(TAG, logLabel + " fallback launch");
+                    Diagnostics.debug(logLabel + " fallback launch");
                     return true;
                 } catch (ActivityNotFoundException | SecurityException fallbackError) {
-                    Log.w(TAG, logLabel + " fallback launch failed: " + fallbackError.getMessage());
+                    Diagnostics.debug(logLabel + " fallback launch failed: " + fallbackError.getMessage());
                     evictTarget(cacheKey);
                     return false;
                 }
             }
         } catch (SecurityException error) {
-            Log.w(TAG, logLabel + " launch setup failed: " + error.getMessage());
+            Diagnostics.debug(logLabel + " launch setup failed: " + error.getMessage());
             evictTarget(cacheKey);
             return false;
         }

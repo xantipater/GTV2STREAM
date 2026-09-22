@@ -21,7 +21,7 @@ public final class YouTubeLauncher {
     private static final String TAG = "GTV2STREAM";
 
     // SmartTube package order lives in LaunchPolicy.SMART_TUBE_ORDER (single
-    // source of truth for the single-query resolution in resolveSmartTube).
+    // source of truth for scoped resolution in resolveSmartTube).
     // The Cobalt package/activity/action contract lives in YouTubeTarget.
     static final String TIZENTUBE_COBALT = YouTubeTarget.COBALT_PACKAGE;
 
@@ -34,30 +34,38 @@ public final class YouTubeLauncher {
     public static boolean open(AccessibilityService service, String title) {
         String uri = TitleResultHelper.youtubeSearchUri(title);
         if (uri == null) {
-            Log.w(TAG, "Empty YouTube search title; nothing to open");
+            Diagnostics.debug("Empty YouTube search title; nothing to open");
             return false;
         }
         boolean tizentube = YouTubeTarget.isTizenTube(AppPrefs.youtubeTarget(service));
         if (tizentube) {
             return openCobalt(service, uri);
         }
-        String cacheKey = LaunchPolicy.cacheKey(YouTubeTarget.SMARTTUBE, uri);
-        LaunchSupport.Target target = LaunchSupport.cachedTarget(cacheKey);
-        if (target == null) {
-            target = resolveSmartTube(service, uri);
-            if (target == null) {
-                Log.w(TAG, "SmartTube is not installed");
-                showMissingTarget(service, false);
-                return false;
-            }
-            LaunchSupport.cacheTarget(cacheKey, target);
-        }
-        boolean opened = LaunchSupport.launchFresh(
-                service, uri, target, target.packageName, "Fresh YouTube", cacheKey);
-        if (!opened) {
-            showMissingTarget(service, false);
-        }
+        boolean opened = launchSmartTube(service, uri);
+        if (!opened) showMissingTarget(service, false);
         return opened;
+    }
+
+    private static boolean launchSmartTube(Context context, String uri) {
+        return launchSmartTube(context, uri, context.getPackageManager()::queryIntentActivities);
+    }
+
+    /** Only package queries are substituted in the Android launcher tests. */
+    interface ActivityQuery {
+        List<ResolveInfo> query(Intent intent, int flags);
+    }
+
+    static boolean launchSmartTube(Context context, String uri, ActivityQuery query) {
+        // Resolve the current preferred handler for every selection. A cached
+        // stable package can disappear or be disabled while beta remains, and
+        // a working cached beta must not hide a newly installed stable package.
+        LaunchSupport.Target target = resolveSmartTube(uri, query);
+        if (target == null) {
+            Diagnostics.debug("SmartTube is not installed");
+            return false;
+        }
+        return LaunchSupport.launchFresh(
+                context, uri, target, target.packageName, "Fresh YouTube");
     }
 
     /**
@@ -71,7 +79,7 @@ public final class YouTubeLauncher {
      */
     private static boolean openCobalt(Context context, String uri) {
         if (!isCobaltInstalled(context)) {
-            Log.w(TAG, "TizenTube Cobalt is not installed");
+            Diagnostics.debug("TizenTube Cobalt is not installed");
             showMissingTarget(context, true);
             return false;
         }
@@ -91,7 +99,7 @@ public final class YouTubeLauncher {
         } catch (PackageManager.NameNotFoundException notInstalled) {
             return false;
         } catch (RuntimeException error) {
-            Log.w(TAG, "Cobalt install check failed: " + error.getMessage());
+            Diagnostics.debug("Cobalt install check failed: " + error.getMessage());
             return false;
         }
     }
@@ -148,13 +156,13 @@ public final class YouTubeLauncher {
         if (tizentube) {
             // No SmartTube fallback: only Cobalt itself satisfies the selection.
             if (!isCobaltInstalled(applicationContext)) {
-                Log.w(TAG, "TizenTube Cobalt is not installed");
+                Diagnostics.debug("TizenTube Cobalt is not installed");
                 if (callback != null) callback.onMissingTarget();
                 else Toast.makeText(context, R.string.status_tizentube_missing, Toast.LENGTH_LONG).show();
                 return false;
             }
         } else if (resolveSmartTube(applicationContext, uri) == null) {
-            Log.w(TAG, "SmartTube is not installed");
+            Diagnostics.debug("SmartTube is not installed");
             if (callback != null) callback.onMissingTarget();
             else Toast.makeText(context, R.string.status_smarttube_missing, Toast.LENGTH_LONG).show();
             return false;
@@ -164,9 +172,7 @@ public final class YouTubeLauncher {
             if (tizentube) {
                 opened = launchCobalt(applicationContext, uri);
             } else {
-                LaunchSupport.Target smartTube = resolveSmartTube(applicationContext, uri);
-                opened = smartTube != null && LaunchSupport.launchFresh(applicationContext, uri, smartTube,
-                        smartTube.packageName, "Fresh YouTube");
+                opened = launchSmartTube(applicationContext, uri);
             }
             if (callback != null) {
                 callback.onResult(opened);
@@ -182,15 +188,18 @@ public final class YouTubeLauncher {
     }
 
     static LaunchSupport.Target resolveSmartTube(Context context, String uri) {
+        return resolveSmartTube(uri, context.getPackageManager()::queryIntentActivities);
+    }
+
+    private static LaunchSupport.Target resolveSmartTube(String uri, ActivityQuery query) {
         // Scoped per-package queries in stable-before-beta preference order.
         // A single generic VIEW query was tried and reverted: on some systems
         // it omits installed handlers (emulator proven: generic returned only
         // the framework browser stub while scoped found SmartTube), so the
-        // v1.1 query shape stays. Cache above keeps repeat clicks cheap.
-        PackageManager packageManager = context.getPackageManager();
+        // v1.1 query shape stays, bounded to the four supported packages.
         for (String packageName : LaunchPolicy.SMART_TUBE_ORDER) {
             Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(packageName);
-            List<ResolveInfo> resolved = packageManager.queryIntentActivities(
+            List<ResolveInfo> resolved = query.query(
                     probe, PackageManager.MATCH_DEFAULT_ONLY);
             if (resolved == null) continue;
             for (ResolveInfo candidate : resolved) {
