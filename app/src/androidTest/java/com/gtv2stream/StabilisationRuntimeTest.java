@@ -225,6 +225,17 @@ public class StabilisationRuntimeTest {
         assertTrue(service.messages.isEmpty());
     }
 
+    @Test public void lateAllowedProviderStillLaunchesCurrentSelection() throws Exception {
+        blockFirst();
+        click("Alien"); awaitLookup();
+        detail("Alien", "netflix");
+        service.release.countDown(); drain();
+        assertEquals(Collections.singletonList("movie:Alien"), service.launched);
+        assertEquals(1, service.badges);
+        assertTrue(service.messages.isEmpty());
+        assertNotNull(MatchCache.get("Alien"));
+    }
+
     @Test public void lateWhitelistedProviderSuppressesOldLookupFailure() throws Exception {
         whitelist("netflix");
         service.firstFailure = new SocketTimeoutException("synthetic timeout");

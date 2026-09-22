@@ -43,7 +43,7 @@ bands remain device-specific; unknown layouts may miss titles.
 The stabilisation matcher requires one distinct exact normalised title (and the
 explicit year, when present). Ambiguous same-name productions, unmatched names,
 or partial franchise matches produce a visible no-match result rather than a guess.
-Searches cover the complete result set up to five pages. Larger, incomplete or changing result sets are left alone instead of guessing from the first page. Multi-page lookups can take longer. This deliberately trades some redirect coverage for correctness. The result's IMDb identifier is then sent to the selected target using exactly:
+Searches cover the complete result set up to five pages. Larger result sets are left alone instead of guessing from the first page. Incomplete, malformed or changing responses produce a lookup failure and can be retried on the next selection; they are not cached as a missing title. Multi-page lookups can take longer. This deliberately trades some redirect coverage for correctness. The result's IMDb identifier is then sent to the selected target using exactly:
 
 - Nuvio — Movie: `nuvio://movie/<imdb-id>` · Series: `nuvio://detail/tv/<imdb-id>`
 - Stremio — Movie: `stremio:///detail/movie/<imdb-id>` · Series: `stremio:///detail/series/<imdb-id>`
@@ -72,7 +72,10 @@ exclusive ownership guarantees. Third-party warm/cold behaviour needs device tes
 
 New selections, rejected app/control actions, Home, opening Settings and service
 destruction invalidate pending launches. Network work stays on the worker; the
-final main-thread launch rechecks selection, target and whitelist. A successful
+final main-thread launch rechecks selection, target and whitelist, including
+provider information received after the lookup started.
+An explicit year arriving after a bare title supersedes the older lookup, so
+duplicate suppression cannot discard the more precise selection. A successful
 YouTube launch permits at most one short-lived reassert against a late stock-YouTube
 window. It uses the same policy checks. A focus-only or unrelated manual YouTube
 open does not authorise redirection. Builds that emit no usable click can fail

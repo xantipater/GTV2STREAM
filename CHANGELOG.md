@@ -46,7 +46,10 @@ All notable changes to GTV2STREAM are documented here. The format follows
 - Preserve selected provider and explicit year through delayed detail callbacks;
   consume failed YouTube click attempts and scope bypass suppression to a selection.
 - Check complete TMDB search results up to five pages before exact matching;
-  incomplete, larger or inconsistent result sets deliberately produce no match.
+  larger result sets deliberately produce no match. Incomplete, malformed or
+  inconsistent responses report a retryable failure without caching a title miss.
+- Apply late provider evidence to pending launches and supersede yearless lookups
+  when the same selection gains an explicit year, including during deduplication.
 - Recover installer outcomes in visible replacement Settings, reject stale queued
   callbacks, preserve Cancel during metadata refresh, and isolate Activity ownership
   of downloads and durable outcomes.

@@ -845,19 +845,22 @@ public class TvRecommendationService extends AccessibilityService {
         // identity, not just for provider matching. A bare detail row supplies
         // no evidence that the user selected a different remake.
         final String query = sameSelection && parsed.year.isEmpty() ? selectedTitle : candidateQuery;
-        long now = SystemClock.elapsedRealtime();
-        // A different entity window also supersedes a pending lookup, even on a
-        // launcher build that did not deliver its click event.
-        if (!lastDispatchedTitle.isEmpty() && lastDispatchedGeneration == interactionSession.ticket()
-                && (!TitleResultHelper.compatibleTitles(lastDispatchedTitle, query)
-                    || youtube != lastDispatchedYoutube)) {
-            interactionSession.invalidate();
-            clearDivert();
-        }
         // Detail callbacks can omit the provider long after the duplicate window
         // has expired. Keep the selected card's policy on those callbacks, but
         // never carry it across a new selection or a different title/route.
         final String currentProvider = provider.isEmpty() && sameSelection ? selectedProvider : provider;
+        long now = SystemClock.elapsedRealtime();
+        // A new entity, an explicit year refining a bare title, or newly supplied
+        // provider evidence supersedes work that captured the older context.
+        // Invalidate before a whitelist return or duplicate check: otherwise an
+        // already queued launch/error can still act on that obsolete snapshot.
+        if (!lastDispatchedTitle.isEmpty() && lastDispatchedGeneration == interactionSession.ticket()
+                && (!TitleResultHelper.matchKey(lastDispatchedTitle).equals(TitleResultHelper.matchKey(query))
+                    || youtube != lastDispatchedYoutube
+                    || !currentProvider.equals(selectedProvider))) {
+            interactionSession.invalidate();
+            clearDivert();
+        }
         selectedTitle = query;
         selectedProvider = currentProvider;
         selectedYoutube = youtube;
@@ -884,7 +887,7 @@ public class TvRecommendationService extends AccessibilityService {
                 query, youtube, currentProvider, now, DUPLICATE_WINDOW_MS)) return;
         long generation = interactionSession.ticket();
         if (generation == lastDispatchedGeneration
-                && TitleResultHelper.compatibleTitles(lastDispatchedTitle, query)
+                && TitleResultHelper.matchKey(lastDispatchedTitle).equals(TitleResultHelper.matchKey(query))
                 && youtube == lastDispatchedYoutube
                 && now - lastDispatchedAt < DUPLICATE_WINDOW_MS) return;
         lastDispatchedTitle = query;

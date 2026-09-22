@@ -72,39 +72,44 @@ public final class TmdbClient {
             int pages = paginationNumber(response, "total_pages");
             int count = paginationNumber(response, "total_results");
             if (results == null || paginationNumber(response, "page") != page
-                    || pages < 0 || pages > MAX_SEARCH_PAGES || count < 0) return null;
+                    || pages < 0 || count < 0) throw invalidSearchResults();
             if (page == 1) {
+                if (count == 0) {
+                    if (results.length() != 0 || pages > 1) throw invalidSearchResults();
+                    return null;
+                }
+                // The page cap is an intentional no-match policy, not a failed lookup.
+                if (pages > MAX_SEARCH_PAGES) return null;
                 totalPages = pages;
                 totalResults = count;
-                if (count == 0) return null;
             }
             // A partial or changing result set cannot establish a unique title.
             // Never redirect from page one when another page may contain a remake.
             if (pages != totalPages || count != totalResults || page > totalPages
-                    || results.length() == 0) return null;
+                    || results.length() == 0) throw invalidSearchResults();
             receivedResults += results.length();
             if (receivedResults > totalResults
-                    || (page < totalPages && receivedResults >= totalResults)) return null;
+                    || (page < totalPages && receivedResults >= totalResults)) throw invalidSearchResults();
             for (int i = 0; i < results.length(); i++) {
                 JSONObject item = results.optJSONObject(i);
-                if (item == null) return null;
+                if (item == null) throw invalidSearchResults();
                 String mediaType = item.optString("media_type", "");
                 String titleKey = "movie".equals(mediaType) ? "title" : "name";
                 String dateKey = "movie".equals(mediaType) ? "release_date" : "first_air_date";
                 if ("person".equals(mediaType)) continue;
-                if (!("movie".equals(mediaType) || "tv".equals(mediaType))) return null;
+                if (!("movie".equals(mediaType) || "tv".equals(mediaType))) throw invalidSearchResults();
                 Object titleValue = item.opt(titleKey), idValue = item.opt("id");
-                if (!(titleValue instanceof String) || !(idValue instanceof Number)) return null;
+                if (!(titleValue instanceof String) || !(idValue instanceof Number)) throw invalidSearchResults();
                 String title = ((String) titleValue).trim();
                 long id = ((Number) idValue).longValue();
-                if (title.isEmpty() || id <= 0 || ((Number) idValue).doubleValue() != id) return null;
+                if (title.isEmpty() || id <= 0 || ((Number) idValue).doubleValue() != id) throw invalidSearchResults();
                 String date = item.optString(dateKey, "");
                 candidates.add(new Candidate(title, date.length() >= 4 ? date.substring(0, 4) : "",
                         mediaType, id, item.optDouble("popularity", 0.0)));
             }
             if (page == totalPages) break;
         }
-        if (receivedResults != totalResults) return null;
+        if (receivedResults != totalResults) throw invalidSearchResults();
         Candidate selected = TitleResultHelper.chooseBest(rawTitle, candidates);
         if (selected == null) return null;
         String external = transport.get(API + "/" + selected.mediaType + "/" + selected.tmdbId
@@ -117,6 +122,12 @@ public final class TmdbClient {
         }
         if (!imdb.matches("tt\\d+")) return null;
         return new TitleMatch(selected.title, selected.year, selected.mediaType, selected.tmdbId, imdb);
+    }
+
+    private static IOException invalidSearchResults() {
+        // Null results are cached as misses. A partial or malformed response must
+        // remain retryable; never include title, credential or response data here.
+        return new IOException("TMDB returned invalid or incomplete search results");
     }
 
     private static int paginationNumber(JSONObject response, String name) {

@@ -345,6 +345,51 @@ then review the release-to-main merge. Neither branch was merged or overwritten.
 Recommendation: ready for code review and physical-device testing, not a release
 approval. No release, production version bump or signing-credential change occurred.
 
+## Review follow-up — 22 September 2026
+
+The refreshed PR #20 baseline was `189c5333ab24e99b9bef3d65accbbd0860747be2`.
+Three additional source-review findings were reproduced and addressed:
+
+- A same-selection detail callback could discover a whitelisted provider while
+  an older providerless lookup or queued launch remained authorised. New provider
+  evidence now supersedes the captured request before bypass or deduplication.
+- An explicit year arriving after a bare title was treated as a duplicate. Lookup
+  identity now includes that year when deciding whether to supersede work. Old
+  results, errors and misses are suppressed; explicit-year-first followed by a
+  bare detail callback still retains the known year and provider.
+- Incomplete, malformed or changing TMDB search responses returned the same value
+  as a completed no-match, creating a one-hour cached miss. They now throw a
+  sanitised retryable lookup failure. A new selection can fetch again immediately;
+  genuine complete misses, ambiguous matches and the initial five-page limit
+  retain the existing refusal policy.
+
+The tests-only commit `5ca044a226e33b9814c44d68db909ac58a1dd8b9` has tree
+`0cb3bd06e9993deb10847d34235d265861bf6a42` and unchanged production code.
+[Negative-control CI 35704612315](https://github.com/xantipater/GTV2STREAM/actions/runs/35704612315)
+ran 75 runtime tests on each of API 26 and 34. Both runs failed the same 14
+behavioural checks: ten service regressions and four malformed/incomplete TMDB
+response groups. Job logs show the expected stale launches, suppressed refined
+lookups, stale feedback and cacheable-null results, rather than compilation or
+fixture failures. The helper/lint/build job passed.
+
+The fixed suite also adds an allowed-provider enrichment positive control, for
+76 runtime tests in total. Its final-head CI results and source identity are
+recorded on [PR #20](https://github.com/xantipater/GTV2STREAM/pull/20); the negative
+run above is intentionally failing evidence, not a release validation pass.
+An independent reviewer who did not author these fixes found no blocking or
+important issue in their source/test diff. The local host did not run an Android
+build or emulator; runtime validation uses the repository's existing CI matrix.
+
+The new tests use the production service, real Android scheduling, and scripted
+TMDB transport. The retry regression passes actual malformed pagination through
+`TmdbClient`, verifies no miss is cached, then repeats the click and succeeds with
+a complete response. Detail callbacks enter the actual dispatch method after
+title/provider extraction because the unbound fixture cannot expose a live
+Google TV entity tree. In-flight and already-posted main-thread launches, stale
+errors/misses and valid recovery are covered; real launcher delivery is not.
+No production dependency, permission, signing material or version was changed.
+The physical-TV and production-signed upgrade gates below remain open.
+
 ## Physical-TV and signed-release gates (not completed by this implementation)
 
 1. On an Onn Android 14 device and the supported TCL, focus a YouTube card then
