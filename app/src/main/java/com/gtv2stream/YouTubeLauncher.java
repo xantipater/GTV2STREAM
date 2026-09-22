@@ -41,23 +41,33 @@ public final class YouTubeLauncher {
         if (tizentube) {
             return openCobalt(service, uri);
         }
+        boolean opened = launchSmartTube(service, uri);
+        if (!opened) showMissingTarget(service, false);
+        return opened;
+    }
+
+    private static boolean launchSmartTube(Context context, String uri) {
+        return launchSmartTube(context, uri, context.getPackageManager()::queryIntentActivities);
+    }
+
+    /** Only package queries are substituted in the Android launcher tests. */
+    interface ActivityQuery {
+        List<ResolveInfo> query(Intent intent, int flags);
+    }
+
+    static boolean launchSmartTube(Context context, String uri, ActivityQuery query) {
         String cacheKey = LaunchPolicy.cacheKey(YouTubeTarget.SMARTTUBE, uri);
         LaunchSupport.Target target = LaunchSupport.cachedTarget(cacheKey);
         if (target == null) {
-            target = resolveSmartTube(service, uri);
+            target = resolveSmartTube(uri, query);
             if (target == null) {
                 Diagnostics.debug("SmartTube is not installed");
-                showMissingTarget(service, false);
                 return false;
             }
             LaunchSupport.cacheTarget(cacheKey, target);
         }
-        boolean opened = LaunchSupport.launchFresh(
-                service, uri, target, target.packageName, "Fresh YouTube", cacheKey);
-        if (!opened) {
-            showMissingTarget(service, false);
-        }
-        return opened;
+        return LaunchSupport.launchFresh(
+                context, uri, target, target.packageName, "Fresh YouTube", cacheKey);
     }
 
     /**
@@ -182,15 +192,18 @@ public final class YouTubeLauncher {
     }
 
     static LaunchSupport.Target resolveSmartTube(Context context, String uri) {
+        return resolveSmartTube(uri, context.getPackageManager()::queryIntentActivities);
+    }
+
+    private static LaunchSupport.Target resolveSmartTube(String uri, ActivityQuery query) {
         // Scoped per-package queries in stable-before-beta preference order.
         // A single generic VIEW query was tried and reverted: on some systems
         // it omits installed handlers (emulator proven: generic returned only
         // the framework browser stub while scoped found SmartTube), so the
         // v1.1 query shape stays. Cache above keeps repeat clicks cheap.
-        PackageManager packageManager = context.getPackageManager();
         for (String packageName : LaunchPolicy.SMART_TUBE_ORDER) {
             Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(packageName);
-            List<ResolveInfo> resolved = packageManager.queryIntentActivities(
+            List<ResolveInfo> resolved = query.query(
                     probe, PackageManager.MATCH_DEFAULT_ONLY);
             if (resolved == null) continue;
             for (ResolveInfo candidate : resolved) {

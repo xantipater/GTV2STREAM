@@ -74,17 +74,58 @@ public class TmdbClientRuntimeTest {
         assertEquals("/3/movie/841/external_ids", network.paths().get(2));
     }
 
-    @Test public void duplicateIdentityAcrossPagesIsHarmlessButMovieAndSeriesAreDistinct() throws Exception {
+    @Test public void overlappingPagesAreIncompleteRatherThanAUniqueMatch() throws Exception {
         ScriptedTransport duplicate = new ScriptedTransport(2,
                 page(1, 2, 2, movie("Dune", 1984, 841)),
                 page(2, 2, 2, movie("Dune", 1984, 841)), EXTERNAL);
-        assertNotNull(new TmdbClient(KEY, duplicate).searchBest("Dune"));
+        assertRetryableSearch(duplicate);
+        assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi"), duplicate.paths());
+    }
+
+    @Test public void fullFirstPageCannotHideAMissingRemakeBehindARepeatedIdentity() throws Exception {
+        JSONObject[] firstPage = new JSONObject[20];
+        firstPage[0] = movie("Dune", 1984, 841);
+        for (int i = 1; i < firstPage.length; i++) firstPage[i] = movie("Other Film " + i, 2000, 1000 + i);
+        // Between requests a ranking change moves this existing item to page two
+        // and the unseen remake to page one. Totals alone still appear complete.
+        ScriptedTransport overlap = new ScriptedTransport(2,
+                page(1, 2, 21, firstPage), page(2, 2, 21, movie("Dune", 1984, 841)), EXTERNAL);
+        assertRetryableSearch(overlap);
+        assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi"), overlap.paths());
+    }
+
+    @Test public void overlappingPersonRowsAlsoMakeTheSearchIncomplete() throws Exception {
+        JSONObject person = new JSONObject().put("media_type", "person").put("id", 123).put("name", "Actor");
+        ScriptedTransport overlap = new ScriptedTransport(2,
+                page(1, 2, 3, movie("Dune", 1984, 841), person), page(2, 2, 3, person), EXTERNAL);
+        assertRetryableSearch(overlap);
+        assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi"), overlap.paths());
+    }
+
+    @Test public void malformedPersonIdentitiesCannotProveCompleteSearchResults() throws Exception {
+        for (Object invalid : new Object[] {JSONObject.NULL, "123", -1, 0, 1.5}) {
+            JSONObject person = new JSONObject().put("media_type", "person").put("id", invalid).put("name", "Actor");
+            assertRetryableAfterFirstPage(page(1, 1, 2, movie("Dune", 1984, 841), person));
+        }
+        assertRetryableAfterFirstPage(page(1, 1, 2, movie("Dune", 1984, 841),
+                new JSONObject().put("media_type", "person").put("name", "Actor")));
+    }
+
+    @Test public void duplicateRowsWithinOnePageAreIncompleteToo() throws Exception {
+        assertRetryableAfterFirstPage(page(1, 1, 2, movie("Dune", 1984, 841), movie("Dune", 1984, 841)));
+    }
+
+    @Test public void equalNumericIdsInDifferentMediaTypesRemainDistinct() throws Exception {
         JSONObject series = new JSONObject().put("media_type", "tv").put("id", 841)
                 .put("name", "Dune").put("first_air_date", "1984-01-01");
         ScriptedTransport ambiguous = new ScriptedTransport(2,
                 page(1, 2, 2, movie("Dune", 1984, 841)), page(2, 2, 2, series));
         assertNull(new TmdbClient(KEY, ambiguous).searchBest("Dune (1984)"));
         assertEquals(Arrays.asList("/3/search/multi", "/3/search/multi"), ambiguous.paths());
+        JSONObject person = new JSONObject().put("media_type", "person").put("id", 841).put("name", "Actor");
+        ScriptedTransport valid = new ScriptedTransport(1,
+                page(1, 1, 2, movie("Dune", 1984, 841), person), EXTERNAL);
+        assertNotNull(new TmdbClient(KEY, valid).searchBest("Dune"));
     }
 
     @Test public void overFivePagesFailsImmediatelyAndFiveCompletePagesCanMatch() throws Exception {

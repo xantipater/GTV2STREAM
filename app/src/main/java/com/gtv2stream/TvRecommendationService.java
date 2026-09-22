@@ -180,11 +180,14 @@ public class TvRecommendationService extends AccessibilityService {
         }
     }
 
+    /** Each returned node is an owned acquisition, just like the framework event source. */
+    AccessibilityNodeInfo eventSource(AccessibilityEvent event) { return event.getSource(); }
+
     private LauncherInteractionPolicy.Assessment assessInteraction(AccessibilityEvent event) {
         Set<String> labels = installedAppLabels;
         // Do not guess while PackageManager's initial worker-side load is pending.
         if (labels == null) return new LauncherInteractionPolicy.Assessment(true, false, false, false);
-        AccessibilityNodeInfo source = event.getSource();
+        AccessibilityNodeInfo source = eventSource(event);
         try {
             // Read all direct evidence before classifying: a provider-only event
             // can belong to a real card whose title exists only on the node.
@@ -251,7 +254,7 @@ public class TvRecommendationService extends AccessibilityService {
             // container ("Column 3") and nothing else.
             rememberCard(immediate);
         }
-        AccessibilityNodeInfo source = event.getSource();
+        AccessibilityNodeInfo source = eventSource(event);
         if (source != null) {
             try {
                 if (immediate.isEmpty() || !immediate.hasProvider()) {
@@ -483,7 +486,7 @@ public class TvRecommendationService extends AccessibilityService {
                 .append(" desc=").append(clip(toString(event.getContentDescription())));
         AccessibilityNodeInfo source = null;
         try {
-            source = event.getSource();
+            source = eventSource(event);
             if (source != null) {
                 android.graphics.Rect bounds = new android.graphics.Rect();
                 source.getBoundsInScreen(bounds);
@@ -615,7 +618,7 @@ public class TvRecommendationService extends AccessibilityService {
      * ancestor chain. Nodes are recycled immediately.
      */
     private RecommendationTitleParser.Source sourceFromClickedNode(AccessibilityEvent event) {
-        AccessibilityNodeInfo owned = event.getSource();
+        AccessibilityNodeInfo owned = eventSource(event);
         if (owned == null) return RecommendationTitleParser.Source.NONE;
         try {
             android.graphics.Rect clickBounds = new android.graphics.Rect();
@@ -755,7 +758,7 @@ public class TvRecommendationService extends AccessibilityService {
     }
 
     /** Uses the launcher's stable ID, then scans only that row's live subtree. */
-    private String titleFromDetailRoot() {
+    String titleFromDetailRoot() {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) return "";
         try {
@@ -1074,7 +1077,7 @@ public class TvRecommendationService extends AccessibilityService {
         String description = toString(event.getContentDescription());
         String payload = !text.trim().isEmpty() ? text : description;
         String extra = "";
-        AccessibilityNodeInfo source = event.getSource();
+        AccessibilityNodeInfo source = eventSource(event);
         if (source != null) {
             try {
                 extra = " (view=" + source.getViewIdResourceName()

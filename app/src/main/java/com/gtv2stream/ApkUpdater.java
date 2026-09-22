@@ -60,6 +60,8 @@ final class ApkUpdater {
     private static volatile DownloadHandle active;
     /** Identity check for queued callbacks from a cancelled/replaced download. */
     private static volatile DownloadHandle latest;
+    /** Session owned by this process during the final installer handoff. */
+    private static int handoffSession = -1;
 
     interface Listener {
         void onProgress(long downloadedBytes, long totalBytes);
@@ -390,10 +392,13 @@ final class ApkUpdater {
             PendingIntent pending = PendingIntent.getBroadcast(context, sessionId, result, flags);
             // Committing hands control to the system installer UI; the user must
             // still confirm before anything is installed. Nothing is silent here.
-            if (!UpdateInstallState.begin(context, sessionId, version)) {
-                throw new IOException("Cannot persist install session");
+            if (!handoffInstall(context, sessionId, version, handle,
+                    () -> session.commit(pending.getIntentSender()))) {
+                session.abandon();
+                deleteQuietly(apk);
+                postCancelled(handle, listener);
+                return;
             }
-            session.commit(pending.getIntentSender());
             synchronized (ApkUpdater.class) { if (active == handle) active = null; }
             deleteQuietly(apk);
             main().post(() -> {
@@ -406,6 +411,16 @@ final class ApkUpdater {
             UpdateInstallState.record(context, sessionId, PackageInstaller.STATUS_FAILURE);
             throw error instanceof IOException ? (IOException) error : new IOException(error);
         }
+    }
+
+    /** Final handoff boundary; tests replace only the system commit operation. */
+    static boolean handoffInstall(Context context, int sessionId, String version,
+            DownloadHandle handle, Runnable commit) throws IOException {
+        if (!UpdateInstallState.begin(context, sessionId, version)) {
+            throw new IOException("Cannot persist install session");
+        }
+        commit.run();
+        return true;
     }
 
     private static File cacheFile(Context context, String version) {

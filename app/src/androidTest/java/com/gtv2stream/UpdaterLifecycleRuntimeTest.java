@@ -28,6 +28,8 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Actual Settings, receiver and framework sessions; no APK is committed or installed. */
 @RunWith(AndroidJUnit4.class)
@@ -45,6 +47,7 @@ public class UpdaterLifecycleRuntimeTest {
         context = instrumentation.getTargetContext();
         installer = context.getPackageManager().getPackageInstaller();
         ApkUpdater.cancelActive();
+        field(ApkUpdater.class, "handoffSession", -1);
         field(ApkUpdater.class, "pendingListener", null);
         prefs().edit().clear().putLong("update_check_at", System.currentTimeMillis())
                 .putString("update_version", "9.0.0")
@@ -64,6 +67,7 @@ public class UpdaterLifecycleRuntimeTest {
                     .submit(() -> { }).get(30, TimeUnit.SECONDS);
         }
         field(ApkUpdater.class, "pendingListener", null);
+        field(ApkUpdater.class, "handoffSession", -1);
         UpdateInstallState.clear(context);
         for (int session : sessions) {
             try { installer.abandonSession(session); }
@@ -152,7 +156,7 @@ public class UpdaterLifecycleRuntimeTest {
         TextView status = (TextView) field(activity, "updateStatus");
         main(() -> assertFalse(button.isEnabled()));
 
-        // Same state as a recreated Activity/process: no in-memory download callback remains.
+        // A recreated Activity has no callback; the live handoff worker still owns its session.
         assertNull(field(ApkUpdater.class, "pendingListener"));
         main(() -> new UpdateInstallReceiver().onReceive(context,
                 result(session, PackageInstaller.STATUS_FAILURE_ABORTED)));
@@ -257,6 +261,99 @@ public class UpdaterLifecycleRuntimeTest {
         assertNotNull(installer.getSessionInfo(session));
     }
 
+    @Test public void cancelledHandoffNeverPersistsOrCommitsTheSession() throws Exception {
+        int session = newSession();
+        ApkUpdater.DownloadHandle handle = ownedHandle();
+        ApkUpdater.cancel(handle);
+        AtomicBoolean committed = new AtomicBoolean();
+        assertFalse(ApkUpdater.handoffInstall(context, session, "9.0.0", handle,
+                () -> committed.set(true)));
+        assertFalse(committed.get());
+        assertEquals(UpdateInstallState.NONE, UpdateInstallState.status(context));
+    }
+
+    @Test public void liveHandoffRejectsCancellationAndKeepsRetryOut() throws Exception {
+        int session = newSession();
+        ApkUpdater.DownloadHandle handle = ownedHandle();
+        CountDownLatch reachedCommit = new CountDownLatch(1);
+        CountDownLatch releaseCommit = new CountDownLatch(1);
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            try {
+                assertTrue(ApkUpdater.handoffInstall(context, session, "9.0.0", handle, () -> {
+                    reachedCommit.countDown();
+                    try { assertTrue(releaseCommit.await(5, TimeUnit.SECONDS)); }
+                    catch (InterruptedException interrupted) { throw new AssertionError(interrupted); }
+                }));
+            } catch (Throwable failure) { error.set(failure); }
+        });
+        worker.start();
+        try {
+            assertTrue(reachedCommit.await(5, TimeUnit.SECONDS));
+            assertEquals(PackageInstaller.STATUS_PENDING_USER_ACTION, UpdateInstallState.status(context));
+            assertNotNull(installer.getSessionInfo(session));
+            RecordingListener retry = new RecordingListener();
+            main(() -> {
+                ApkUpdater.cancel(handle);
+                ApkUpdater.startUpdate(context, null, retry);
+            });
+            instrumentation.waitForIdleSync();
+            assertFalse("Cancellation cannot revoke an already claimed handoff", handle.isCancelled());
+            assertEquals(java.util.Collections.singletonList("prompt"), retry.events);
+            assertEquals(session, UpdateInstallState.session(context));
+        } finally {
+            releaseCommit.countDown();
+            worker.join(5000L);
+        }
+        assertFalse(worker.isAlive());
+        if (error.get() != null) throw new AssertionError(error.get());
+        assertEquals(-1, ((Integer) field(ApkUpdater.class, "handoffSession")).intValue());
+    }
+
+    @Test public void failedCommitReleasesOwnershipAndAnImmediateRetryCanStart() throws Exception {
+        int session = newSession();
+        ApkUpdater.DownloadHandle handle = ownedHandle();
+        RuntimeException expected = new IllegalStateException("synthetic commit failure");
+        try {
+            ApkUpdater.handoffInstall(context, session, "9.0.0", handle, () -> { throw expected; });
+            fail("Commit failure must propagate to the download failure handler");
+        } catch (RuntimeException actual) {
+            assertSame(expected, actual);
+        }
+        assertEquals(-1, ((Integer) field(ApkUpdater.class, "handoffSession")).intValue());
+        assertEquals(PackageInstaller.STATUS_FAILURE, UpdateInstallState.status(context));
+        assertNull(installer.getSessionInfo(session));
+        RecordingListener retry = new RecordingListener();
+        main(() -> ApkUpdater.startUpdate(context, null, retry));
+        instrumentation.waitForIdleSync();
+        assertEquals(java.util.Collections.singletonList("failure:NO_APK"), retry.events);
+        assertEquals(UpdateInstallState.NONE, UpdateInstallState.status(context));
+    }
+
+    @Test public void restoredUnsealedSessionIsAbandonedAndSettingsAllowsRetry() throws Exception {
+        int session = newSession();
+        assertTrue(UpdateInstallState.begin(context, session, "9.0.0"));
+        assertFalse(installer.getSessionInfo(session).isSealed());
+        // No live owner survives process death between durable begin and commit.
+        activity = openSettings();
+        Button button = (Button) field(activity, "downloadUpdateButton");
+        TextView status = (TextView) field(activity, "updateStatus");
+        main(() -> {
+            assertTrue(button.isEnabled());
+            assertEquals(context.getString(R.string.download_update, "9.0.0"), button.getText().toString());
+            assertEquals(context.getString(R.string.update_install_failed), status.getText().toString());
+        });
+        assertNull(installer.getSessionInfo(session));
+        assertEquals(UpdateInstallState.NONE, UpdateInstallState.status(context));
+    }
+
+    private ApkUpdater.DownloadHandle ownedHandle() throws Exception {
+        ApkUpdater.DownloadHandle handle = new ApkUpdater.DownloadHandle();
+        field(ApkUpdater.class, "active", handle);
+        field(ApkUpdater.class, "latest", handle);
+        return handle;
+    }
+
     private Activity openSettings() {
         Activity settings = instrumentation.startActivitySync(new Intent(context, SettingsActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK));
@@ -278,12 +375,19 @@ public class UpdaterLifecycleRuntimeTest {
         assertTrue(started.await(5, TimeUnit.SECONDS));
     }
     private int pendingSession() throws Exception {
+        int session = newSession();
+        // Explicitly model a live worker, not an orphan restored after process death.
+        field(ApkUpdater.class, "handoffSession", session);
+        assertTrue(UpdateInstallState.begin(context, session, "9.0.0"));
+        return session;
+    }
+
+    private int newSession() throws Exception {
         PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(
                 PackageInstaller.SessionParams.MODE_FULL_INSTALL);
         params.setAppPackageName(context.getPackageName());
         int session = installer.createSession(params);
         sessions.add(session);
-        assertTrue(UpdateInstallState.begin(context, session, "9.0.0"));
         return session;
     }
 

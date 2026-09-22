@@ -106,6 +106,108 @@ public class StabilisationRuntimeTest {
         assertTrue(service.launched.isEmpty());
     }
 
+    @Test public void titleOnlyFocusCannotReplayPreviousYoutubeCard() throws Exception {
+        focus("Big Buck Bunny", "Watch on YouTube");
+        focus("Alien");
+        click("Column 3"); stockYoutube(); drain();
+        assertTrue(service.launched.isEmpty());
+        assertTrue(service.lookedUp.isEmpty());
+    }
+
+    @Test public void matchingTitleOnlyFocusKeepsUsableYoutubeCard() throws Exception {
+        focus("Big Buck Bunny", "Watch on YouTube");
+        focus("Big Buck Bunny");
+        click("Column 3"); drain();
+        assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
+    }
+
+    @Test public void conflictingFocusNodeCannotRestorePreviousYoutubeCard() throws Exception {
+        focus("Big Buck Bunny", "Watch on YouTube");
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, "Alien",
+                "Big Buck Bunny. Watch on YouTube", "Alien");
+        click("Column 3"); stockYoutube(); drain();
+        assertTrue(service.launched.isEmpty());
+        click("Big Buck Bunny", "Watch on YouTube"); drain();
+        assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
+    }
+
+    @Test public void compatibleClickedNodeProviderHonoursWhitelist() throws Exception {
+        whitelist("netflix");
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Alien", "Alien. Watch on Netflix", "Alien");
+        drain();
+        assertTrue(service.lookedUp.isEmpty());
+        assertTrue(service.launched.isEmpty());
+        whitelist("");
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Alien", "Alien. Watch on Netflix", "Alien");
+        drain();
+        assertEquals(Collections.singletonList("movie:Alien"), service.launched);
+    }
+
+    @Test public void compatibleClickedNodeYoutubeProviderChoosesYoutubeRoute() throws Exception {
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Big Buck Bunny",
+                "Big Buck Bunny. Watch on YouTube", "Big Buck Bunny");
+        drain();
+        assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
+        assertTrue(service.lookedUp.isEmpty());
+    }
+
+    @Test public void clickedNodeEnrichmentPreservesExplicitYear() throws Exception {
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Dune", "Dune. Watch on Netflix", "Dune (1984)");
+        drain();
+        assertEquals(Collections.singletonList("Dune (1984)"), service.lookedUp);
+        assertEquals(Collections.singletonList("1984"), service.launchedYears);
+    }
+
+    @Test public void conflictingClickedNodeEvidenceIsTerminal() throws Exception {
+        focus("Big Buck Bunny", "Watch on YouTube");
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Alien", "Dune. Watch on Netflix", "Alien");
+        stockYoutube(); drain();
+        assertTrue(service.launched.isEmpty());
+        assertTrue(service.lookedUp.isEmpty());
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Dune", "Dune. Watch on Prime Video",
+                "Dune", "Watch on Netflix");
+        drain();
+        assertTrue(service.launched.isEmpty());
+    }
+
+    @Test public void entityPlaybackActionKeepsConsumedWhitelistAndYear() throws Exception {
+        whitelist("prime video");
+        focus("Dune (1984)", "Watch on Prime Video");
+        main(() -> service.detailTitle = "Dune");
+        window(HOME, "com.example.entity.EntityActivity");
+        click("Watch now"); drain();
+        assertTrue(service.lookedUp.isEmpty());
+        assertTrue(service.launched.isEmpty());
+        whitelist("");
+        click("Play"); drain();
+        assertEquals(Collections.singletonList("Dune (1984)"), service.lookedUp);
+        assertEquals(Collections.singletonList("1984"), service.launchedYears);
+    }
+
+    @Test public void detailActionDoesNotInheritPolicyForDifferentTitleOrYear() throws Exception {
+        whitelist("prime video");
+        focus("Dune (1984)", "Watch on Prime Video");
+        main(() -> service.detailTitle = "Dune");
+        window(HOME, "com.example.entity.EntityActivity");
+        main(() -> service.detailTitle = "Dune (2021)");
+        click("Play"); drain();
+        assertEquals(Collections.singletonList("Dune (2021)"), service.lookedUp);
+        click("Alien", "Watch on Prime Video");
+        main(() -> service.detailTitle = "Jaws");
+        click("Watch now"); drain();
+        assertEquals(Arrays.asList("Dune (2021)", "Jaws"), service.lookedUp);
+    }
+
+    @Test public void newCardCannotInheritPriorDetailActionPolicy() throws Exception {
+        whitelist("prime video");
+        focus("Dune (1984)", "Watch on Prime Video");
+        main(() -> service.detailTitle = "Dune");
+        window(HOME, "com.example.entity.EntityActivity");
+        click("Dune"); drain();
+        assertEquals(Collections.singletonList("Dune"), service.lookedUp);
+        assertEquals(Collections.singletonList(""), service.launchedYears);
+    }
+
     @Test public void whitelistedYoutubeNeverLaunchesIncludingRepeatedWindows() throws Exception {
         whitelist("youtube");
         focus("Big Buck Bunny", "Watch on YouTube");
@@ -735,6 +837,17 @@ public class StabilisationRuntimeTest {
     private void main(Runnable action) { instrumentation.runOnMainSync(action); }
     private void click(String... text) { deliver(AccessibilityEvent.TYPE_VIEW_CLICKED, HOME, text); }
     private void focus(String... text) { deliver(AccessibilityEvent.TYPE_VIEW_FOCUSED, HOME, text); }
+    private void nodeEvent(int type, String nodeText, String nodeDescription, String... values) {
+        main(() -> {
+            AccessibilityNodeInfo node = AccessibilityNodeInfo.obtain();
+            node.setText(nodeText);
+            node.setContentDescription(nodeDescription);
+            service.eventNode = node;
+            AccessibilityEvent event = event(type, HOME, values);
+            try { deliverToService(event); }
+            finally { service.eventNode = null; node.recycle(); event.recycle(); }
+        });
+    }
     // The unbound service fixture cannot expose a live entity title tree. Enter
     // its actual detail dispatch after extraction, as the earlier detail tests do.
     private void detail(String title, String provider) { main(() -> dispatchDetail(title, provider)); }
@@ -813,8 +926,19 @@ public class StabilisationRuntimeTest {
         boolean youtubeSuccess = true;
         int badges;
         AccessibilityNodeInfo root;
+        AccessibilityNodeInfo eventNode;
+        String detailTitle;
         TestService(Context base) { attachBaseContext(base); }
         @Override public AccessibilityNodeInfo getRootInActiveWindow() { return root; }
+        @Override AccessibilityNodeInfo eventSource(AccessibilityEvent event) {
+            return eventNode == null ? super.eventSource(event) : AccessibilityNodeInfo.obtain(eventNode);
+        }
+        @Override String titleFromDetailRoot() {
+            // Unbound framework fixtures cannot resolve live entity rows. Keep
+            // production year enrichment, and replace only tree acquisition.
+            return detailTitle == null ? super.titleFromDetailRoot() : (String) invoke(this,
+                    "detailLookupTitle", new Class<?>[] {String.class}, detailTitle);
+        }
         @Override TitleMatch lookupTitle(String key, String title) throws IOException {
             assertNotSame(Looper.getMainLooper(), Looper.myLooper());
             lookedUp.add(title);

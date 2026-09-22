@@ -8,7 +8,7 @@ import java.util.Set;
 /** Dependency-free unit test harness; run with ./gradlew runHelperTests. */
 public final class DeepLinkHelperTest {
     public static void main(String[] args) throws Exception {
-        int assertions = LauncherInteractionTest.run() + StabilisationTest.run();
+        int assertions = LauncherInteractionTest.run() + StabilisationTest.run() + MatchingBoundaryTest.run();
         check(!YouTubeTarget.isTizenTube(null), "null YouTube target keeps SmartTube default"); assertions++;
         check(!YouTubeTarget.isTizenTube(YouTubeTarget.SMARTTUBE), "SmartTube target selected"); assertions++;
         check(YouTubeTarget.isTizenTube(YouTubeTarget.TIZENTUBE), "TizenTube target selected"); assertions++;
