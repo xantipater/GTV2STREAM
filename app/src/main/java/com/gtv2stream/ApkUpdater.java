@@ -75,6 +75,8 @@ final class ApkUpdater {
     /** Cancels an in-flight download; the partial file is deleted. */
     static final class DownloadHandle {
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        // Guarded by ApkUpdater.class; claimed handoffs can only be cancelled in Android's UI.
+        private boolean handedOff;
         void cancel() { cancelled.set(true); }
         boolean isCancelled() { return cancelled.get(); }
     }
@@ -110,12 +112,14 @@ final class ApkUpdater {
      */
     static synchronized DownloadHandle startUpdate(Context context, UpdateChecker.UpdateInfo info,
             Listener listener) {
-        if (UpdateInstallState.status(context) == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+        if (isInstallPending(context)) {
             pendingListener = listener;
             main().post(() -> {
-                if (pendingListener == listener) listener.onInstallPrompt();
+                if (pendingListener == listener && isInstallPending(context)) listener.onInstallPrompt();
             });
-            return new DownloadHandle();
+            DownloadHandle pending = new DownloadHandle();
+            pending.handedOff = true;
+            return pending;
         }
         // A retry owns a new operation; delayed preference notifications must
         // not resurrect the previous installer's terminal outcome.
@@ -142,10 +146,23 @@ final class ApkUpdater {
     }
 
     /** An older Activity must never cancel a newer Activity's transfer. */
-    static synchronized void cancel(DownloadHandle handle) {
-        if (handle == null) return;
+    static synchronized boolean cancel(DownloadHandle handle) {
+        if (handle == null) return true;
+        if (handle.handedOff) return false;
         handle.cancel();
         if (active == handle) active = null;
+        return true;
+    }
+
+    static synchronized boolean isHandoffInProgress() { return handoffSession >= 0; }
+
+    static synchronized boolean isHandoffInProgress(int sessionId) {
+        return sessionId >= 0 && handoffSession == sessionId;
+    }
+
+    private static boolean isInstallPending(Context context) {
+        return isHandoffInProgress()
+                || UpdateInstallState.status(context) == PackageInstaller.STATUS_PENDING_USER_ACTION;
     }
 
     /** Settings may be destroyed while the system installer is still running. */
@@ -158,7 +175,10 @@ final class ApkUpdater {
         if (!UpdateInstallState.record(context, sessionId, status)) return;
         final Listener listener = pendingListener;
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) return;
-        active = null;
+        synchronized (ApkUpdater.class) {
+            if (handoffSession == sessionId) handoffSession = -1;
+            active = null;
+        }
         if (listener == null) return;
         main().post(() -> {
             // The Activity can be destroyed or a retry can take ownership while
@@ -402,7 +422,8 @@ final class ApkUpdater {
             synchronized (ApkUpdater.class) { if (active == handle) active = null; }
             deleteQuietly(apk);
             main().post(() -> {
-                if (latest == handle && !handle.isCancelled() && pendingListener == listener) {
+                if (latest == handle && !handle.isCancelled() && pendingListener == listener
+                        && isInstallPending(context)) {
                     listener.onInstallPrompt();
                 }
             });
@@ -416,11 +437,25 @@ final class ApkUpdater {
     /** Final handoff boundary; tests replace only the system commit operation. */
     static boolean handoffInstall(Context context, int sessionId, String version,
             DownloadHandle handle, Runnable commit) throws IOException {
-        if (!UpdateInstallState.begin(context, sessionId, version)) {
-            throw new IOException("Cannot persist install session");
+        synchronized (ApkUpdater.class) {
+            if (active != handle || latest != handle || handle.isCancelled() || handoffSession >= 0) return false;
+            handle.handedOff = true;
+            handoffSession = sessionId;
+            active = null;
         }
-        commit.run();
-        return true;
+        // Never hold the updater monitor during disk or installer IPC: cancel and
+        // Settings may run on the main thread while this worker persists/commits.
+        try {
+            if (!UpdateInstallState.begin(context, sessionId, version)) {
+                throw new IOException("Cannot persist install session");
+            }
+            commit.run();
+            return true;
+        } finally {
+            synchronized (ApkUpdater.class) {
+                if (handoffSession == sessionId) handoffSession = -1;
+            }
+        }
     }
 
     private static File cacheFile(Context context, String version) {

@@ -52,6 +52,8 @@ public class TvRecommendationService extends AccessibilityService {
     private RecommendationTitleParser.Source focusedHeroSource =
             RecommendationTitleParser.Source.NONE;
     private long focusedHeroCapturedAt;
+    /** Direct focus identity constrains slower, weaker ambient-panel evidence. */
+    private String focusedTitle = "";
     /**
      * The last real card payload, captured either when a card was focused or
      * from a click event that actually carried one. This is the primary source
@@ -139,6 +141,7 @@ public class TvRecommendationService extends AccessibilityService {
             return;
         }
         logRawLauncherEvent(event);
+        long previousGeneration = interactionSession.ticket();
         if (type == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
             interactionSession.beginEditing();
             clearRecommendationContext();
@@ -159,7 +162,7 @@ public class TvRecommendationService extends AccessibilityService {
         if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             lastLauncherClickAt = SystemClock.elapsedRealtime();
             clearDivert();
-            handleLauncherClick(event);
+            handleLauncherClick(event, previousGeneration);
         } else if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 && isEntityWindow(event.getClassName())) {
             interactionSession.showDetail();
@@ -207,6 +210,7 @@ public class TvRecommendationService extends AccessibilityService {
             pendingHeroCapture = null;
         }
         clearFocusedHeroSource();
+        focusedTitle = "";
         clearLastCardSource();
         clearDivert();
         lastDispatchedTitle = "";
@@ -234,15 +238,17 @@ public class TvRecommendationService extends AccessibilityService {
         // provider edge (e.g. "The Tomorrow War, requires Prime Video
         // subscription, ..."). Cache a provider-bearing source immediately so
         // the YouTube-only window poll below can never overwrite it.
-        RecommendationTitleParser.Source immediate =
-                RecommendationTitleParser.fromEventTextSource(event.getText());
-        if (immediate.isEmpty() || !immediate.hasProvider()) {
-            immediate = RecommendationTitleParser.fromDescriptionSource(
-                    toString(event.getContentDescription()));
+        RecommendationTitleParser.Source immediate = directSource(event);
+        if (immediate == null) {
+            interactionSession.invalidate();
+            clearRecommendationContext();
+            return;
         }
-        if (!immediate.isEmpty() && !lastCardSource.isEmpty()
-                && (!TitleResultHelper.compatibleTitles(immediate.lookupTitle(), lastCardSource.lookupTitle())
-                    || (immediate.hasProvider() && immediate.youtube != lastCardSource.youtube))) {
+        focusedTitle = immediate.lookupTitle();
+        if (incompatibleSource(immediate, lastCardSource)
+                || incompatibleSource(immediate, focusedHeroSource)) {
+            if (pendingHeroCapture != null) handler.removeCallbacks(pendingHeroCapture);
+            pendingHeroCapture = null;
             clearLastCardSource();
             clearFocusedHeroSource();
             clearDivert();
@@ -257,14 +263,6 @@ public class TvRecommendationService extends AccessibilityService {
         AccessibilityNodeInfo source = eventSource(event);
         if (source != null) {
             try {
-                if (immediate.isEmpty() || !immediate.hasProvider()) {
-                    RecommendationTitleParser.Source nodeSource =
-                            RecommendationTitleParser.fromDescriptionSource(
-                                    toString(source.getContentDescription()));
-                    if (!nodeSource.isEmpty() && nodeSource.hasProvider()) {
-                        immediate = nodeSource;
-                    }
-                }
                 if (!immediate.isEmpty() && immediate.hasProvider()) {
                     if (pendingHeroCapture != null) handler.removeCallbacks(pendingHeroCapture);
                     pendingHeroCapture = null;
@@ -293,6 +291,41 @@ public class TvRecommendationService extends AccessibilityService {
         } else {
             clearFocusedHeroSource();
         }
+    }
+
+    private static boolean incompatibleSource(RecommendationTitleParser.Source current,
+            RecommendationTitleParser.Source cached) {
+        return !current.isEmpty() && !cached.isEmpty()
+                && (!TitleResultHelper.compatibleTitles(current.lookupTitle(), cached.lookupTitle())
+                    || (current.hasProvider() && current.youtube != cached.youtube));
+    }
+
+    /** Direct evidence only; null means contradictory content, not a missing payload. */
+    private RecommendationTitleParser.Source directSource(AccessibilityEvent event) {
+        RecommendationTitleParser.Source result = mergeDirectSources(
+                RecommendationTitleParser.fromEventTextSource(event.getText()),
+                RecommendationTitleParser.fromDescriptionSource(toString(event.getContentDescription())));
+        AccessibilityNodeInfo node = eventSource(event);
+        if (node == null) return result;
+        try {
+            result = mergeDirectSources(result,
+                    RecommendationTitleParser.fromDescriptionSource(toString(node.getText())));
+            return mergeDirectSources(result,
+                    RecommendationTitleParser.fromDescriptionSource(toString(node.getContentDescription())));
+        } finally {
+            node.recycle();
+        }
+    }
+
+    private static RecommendationTitleParser.Source mergeDirectSources(
+            RecommendationTitleParser.Source primary, RecommendationTitleParser.Source context) {
+        if (primary == null) return null;
+        if (primary.isEmpty()) return context;
+        if (context.isEmpty()) return primary;
+        if (!TitleResultHelper.compatibleTitles(primary.lookupTitle(), context.lookupTitle())
+                || (primary.hasProvider() && context.hasProvider()
+                    && !primary.provider.equals(context.provider))) return null;
+        return RecommendationTitleParser.withProviderContext(primary, context);
     }
 
     private void scheduleFocusedHeroCapture(android.graphics.Rect bounds) {
@@ -545,13 +578,36 @@ public class TvRecommendationService extends AccessibilityService {
                 SystemClock.elapsedRealtime(), FOCUSED_HERO_WINDOW_MS);
     }
 
-    private void handleLauncherClick(AccessibilityEvent event) {
+    private void handleLauncherClick(AccessibilityEvent event, long previousGeneration) {
         cancelTitleRetry();
-        RecommendationTitleParser.Source source =
-                RecommendationTitleParser.fromEventTextSource(event.getText());
-        RecommendationTitleParser.Source described = RecommendationTitleParser.fromDescriptionSource(
-                toString(event.getContentDescription()));
-        source = RecommendationTitleParser.withProviderContext(source, described);
+        RecommendationTitleParser.Source source = directSource(event);
+        if (source == null) {
+            interactionSession.invalidate();
+            clearRecommendationContext();
+            return;
+        }
+        if (isDetailPlaybackAction(event)) {
+            String detailTitle = titleFromDetailRoot();
+            if (!detailTitle.isEmpty() && (source.isEmpty()
+                    || (!source.youtube && TitleResultHelper.compatibleTitles(source.lookupTitle(), detailTitle)))) {
+                if (TitleResultHelper.extractYear(detailTitle).isEmpty() && !source.year.isEmpty()) {
+                    detailTitle = source.lookupTitle();
+                }
+                String detailProvider = source.hasProvider() ? source.provider : focusedProviderForDetail(detailTitle);
+                // The click invalidates older work, but Watch/Play on the same
+                // authoritative detail row continues that entity's known policy.
+                // A new card, another title/year, or a prior generation cannot
+                // inherit it merely because the click omitted provider metadata.
+                if (selectedGeneration == previousGeneration && !selectedYoutube
+                        && TitleResultHelper.compatibleTitles(selectedTitle, detailTitle)) {
+                    if (TitleResultHelper.extractYear(detailTitle).isEmpty()) detailTitle = selectedTitle;
+                    if (detailProvider.isEmpty()) detailProvider = selectedProvider;
+                }
+                if (!detailProvider.isEmpty()) clearFocusedHeroSource();
+                dispatchTitle(detailTitle, false, detailProvider);
+                return;
+            }
+        }
         if (!source.isEmpty() && !source.hasProvider() && hasFreshFocusedHeroSource()
                 && TitleResultHelper.compatibleTitles(source.lookupTitle(), focusedHeroSource.lookupTitle())) {
             source = RecommendationTitleParser.withProviderContext(source, focusedHeroSource);
@@ -567,6 +623,7 @@ public class TvRecommendationService extends AccessibilityService {
             // describes the card the user actually pressed: remember it as the
             // primary source for a stock-YouTube divert before any panel cache
             // can be consulted.
+            focusedTitle = source.lookupTitle();
             rememberCard(source);
             if (!source.youtube && focusedHeroSource.youtube) clearFocusedHeroSource();
             dispatchTitle(source.lookupTitle(), source.youtube, source.provider);
@@ -607,6 +664,25 @@ public class TvRecommendationService extends AccessibilityService {
             }
             scheduleTitleRetry();
         }
+    }
+
+    private boolean isDetailPlaybackAction(AccessibilityEvent event) {
+        if (event.getText() != null && !event.getText().isEmpty()
+                && isPlaybackLabel(toString(event.getText().get(0)))) return true;
+        if (isPlaybackLabel(toString(event.getContentDescription()))) return true;
+        AccessibilityNodeInfo node = eventSource(event);
+        if (node == null) return false;
+        try {
+            return isPlaybackLabel(toString(node.getText()))
+                    || isPlaybackLabel(toString(node.getContentDescription()));
+        } finally {
+            node.recycle();
+        }
+    }
+
+    private static boolean isPlaybackLabel(String value) {
+        return "watch".equalsIgnoreCase(value.trim()) || "watch now".equalsIgnoreCase(value.trim())
+                || "play".equalsIgnoreCase(value.trim()) || "trailer".equalsIgnoreCase(value.trim());
     }
 
     /**
@@ -1012,6 +1088,15 @@ public class TvRecommendationService extends AccessibilityService {
 
     /** YouTube cards expose their title and provider in the hero panel. */
     private RecommendationTitleParser.Source sourceFromWindowPayloads() {
+        RecommendationTitleParser.Source source = readWindowSource();
+        if (!focusedTitle.isEmpty() && !source.isEmpty()
+                && !TitleResultHelper.compatibleTitles(focusedTitle, source.lookupTitle())) {
+            return RecommendationTitleParser.Source.NONE;
+        }
+        return source;
+    }
+
+    RecommendationTitleParser.Source readWindowSource() {
         if (interactionSession.isEditing()) return RecommendationTitleParser.Source.NONE;
         List<String> entries = new ArrayList<>();
         AccessibilityNodeInfo root = getRootInActiveWindow();

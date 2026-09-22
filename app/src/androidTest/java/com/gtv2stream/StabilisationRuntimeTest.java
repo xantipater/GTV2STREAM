@@ -121,6 +121,34 @@ public class StabilisationRuntimeTest {
         assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
     }
 
+    @Test public void titleOnlyFocusRejectsStaleAmbientPanelOnImmediateClick() throws Exception {
+        main(() -> service.windowPayload = RecommendationTitleParser.youtubeSource("Big Buck Bunny"));
+        focus("Big Buck Bunny", "Watch on YouTube");
+        focus("Alien");
+        click("Column 3"); stockYoutube(); drain();
+        assertTrue(service.launched.isEmpty());
+        assertTrue(service.lookedUp.isEmpty());
+    }
+
+    @Test public void nodeFocusRejectsStaleAmbientPanelOnImmediateClick() throws Exception {
+        main(() -> service.windowPayload = RecommendationTitleParser.youtubeSource("Big Buck Bunny"));
+        focus("Big Buck Bunny", "Watch on YouTube");
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, "Alien", "", "Alien");
+        click("Column 3"); stockYoutube(); drain();
+        assertTrue(service.launched.isEmpty());
+    }
+
+    @Test public void ambientPanelStillWorksForMatchingFocusOrNoTitleEvidence() throws Exception {
+        main(() -> service.windowPayload = RecommendationTitleParser.youtubeSource("Big Buck Bunny"));
+        focus("Big Buck Bunny");
+        click("Column 3"); drain();
+        assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
+        window(HOME, "com.example.home.HomeActivity");
+        focus("Column 3");
+        click("Column 3"); drain();
+        assertEquals(2, service.launched.size());
+    }
+
     @Test public void conflictingFocusNodeCannotRestorePreviousYoutubeCard() throws Exception {
         focus("Big Buck Bunny", "Watch on YouTube");
         nodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, "Alien",
@@ -149,6 +177,14 @@ public class StabilisationRuntimeTest {
         drain();
         assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
         assertTrue(service.lookedUp.isEmpty());
+    }
+
+    @Test public void providerBearingClickedNodeTextHonoursWhitelist() throws Exception {
+        whitelist("netflix");
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Alien. Watch on Netflix", "", "Alien");
+        drain();
+        assertTrue(service.lookedUp.isEmpty());
+        assertTrue(service.launched.isEmpty());
     }
 
     @Test public void clickedNodeEnrichmentPreservesExplicitYear() throws Exception {
@@ -182,6 +218,17 @@ public class StabilisationRuntimeTest {
         click("Play"); drain();
         assertEquals(Collections.singletonList("Dune (1984)"), service.lookedUp);
         assertEquals(Collections.singletonList("1984"), service.launchedYears);
+    }
+
+    @Test public void playbackNodeTitleStillRetainsAuthoritativeEntityPolicy() throws Exception {
+        whitelist("prime video");
+        focus("Dune (1984)", "Watch on Prime Video");
+        main(() -> service.detailTitle = "Dune");
+        window(HOME, "com.example.entity.EntityActivity");
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Play", "Dune", "Play");
+        drain();
+        assertTrue(service.lookedUp.isEmpty());
+        assertTrue(service.launched.isEmpty());
     }
 
     @Test public void detailActionDoesNotInheritPolicyForDifferentTitleOrYear() throws Exception {
@@ -764,6 +811,8 @@ public class StabilisationRuntimeTest {
                     .putString("update_apk_url", "https://github.com/xantipater/GTV2STREAM/releases/download/v9.0.0/test.apk")
                     .putString(AppPrefs.UPDATE_PROMPTED_VERSION, "9.0.0").commit();
             assertTrue(UpdateInstallState.begin(context, session, "9.0.0"));
+            // Model the live install worker owning this intentionally unsealed session.
+            field(ApkUpdater.class, "handoffSession", session);
             activity = instrumentation.startActivitySync(new Intent(context, SettingsActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             final Activity settings = activity;
@@ -789,6 +838,7 @@ public class StabilisationRuntimeTest {
                 main(settings::finish);
                 instrumentation.waitForIdleSync();
             }
+            field(ApkUpdater.class, "handoffSession", -1);
             installer.abandonSession(session);
         }
     }
@@ -928,6 +978,7 @@ public class StabilisationRuntimeTest {
         AccessibilityNodeInfo root;
         AccessibilityNodeInfo eventNode;
         String detailTitle;
+        RecommendationTitleParser.Source windowPayload;
         TestService(Context base) { attachBaseContext(base); }
         @Override public AccessibilityNodeInfo getRootInActiveWindow() { return root; }
         @Override AccessibilityNodeInfo eventSource(AccessibilityEvent event) {
@@ -938,6 +989,11 @@ public class StabilisationRuntimeTest {
             // production year enrichment, and replace only tree acquisition.
             return detailTitle == null ? super.titleFromDetailRoot() : (String) invoke(this,
                     "detailLookupTitle", new Class<?>[] {String.class}, detailTitle);
+        }
+        @Override RecommendationTitleParser.Source readWindowSource() {
+            // Replace extraction from an unbound live window, never the focus
+            // identity check or click/fallback orchestration under test.
+            return windowPayload == null ? super.readWindowSource() : windowPayload;
         }
         @Override TitleMatch lookupTitle(String key, String title) throws IOException {
             assertNotSame(Looper.getMainLooper(), Looper.myLooper());

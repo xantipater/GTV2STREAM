@@ -21,7 +21,7 @@ public final class YouTubeLauncher {
     private static final String TAG = "GTV2STREAM";
 
     // SmartTube package order lives in LaunchPolicy.SMART_TUBE_ORDER (single
-    // source of truth for the single-query resolution in resolveSmartTube).
+    // source of truth for scoped resolution in resolveSmartTube).
     // The Cobalt package/activity/action contract lives in YouTubeTarget.
     static final String TIZENTUBE_COBALT = YouTubeTarget.COBALT_PACKAGE;
 
@@ -56,18 +56,16 @@ public final class YouTubeLauncher {
     }
 
     static boolean launchSmartTube(Context context, String uri, ActivityQuery query) {
-        String cacheKey = LaunchPolicy.cacheKey(YouTubeTarget.SMARTTUBE, uri);
-        LaunchSupport.Target target = LaunchSupport.cachedTarget(cacheKey);
+        // Resolve the current preferred handler for every selection. A cached
+        // stable package can disappear or be disabled while beta remains, and
+        // a working cached beta must not hide a newly installed stable package.
+        LaunchSupport.Target target = resolveSmartTube(uri, query);
         if (target == null) {
-            target = resolveSmartTube(uri, query);
-            if (target == null) {
-                Diagnostics.debug("SmartTube is not installed");
-                return false;
-            }
-            LaunchSupport.cacheTarget(cacheKey, target);
+            Diagnostics.debug("SmartTube is not installed");
+            return false;
         }
         return LaunchSupport.launchFresh(
-                context, uri, target, target.packageName, "Fresh YouTube", cacheKey);
+                context, uri, target, target.packageName, "Fresh YouTube");
     }
 
     /**
@@ -174,9 +172,7 @@ public final class YouTubeLauncher {
             if (tizentube) {
                 opened = launchCobalt(applicationContext, uri);
             } else {
-                LaunchSupport.Target smartTube = resolveSmartTube(applicationContext, uri);
-                opened = smartTube != null && LaunchSupport.launchFresh(applicationContext, uri, smartTube,
-                        smartTube.packageName, "Fresh YouTube");
+                opened = launchSmartTube(applicationContext, uri);
             }
             if (callback != null) {
                 callback.onResult(opened);
@@ -200,7 +196,7 @@ public final class YouTubeLauncher {
         // A single generic VIEW query was tried and reverted: on some systems
         // it omits installed handlers (emulator proven: generic returned only
         // the framework browser stub while scoped found SmartTube), so the
-        // v1.1 query shape stays. Cache above keeps repeat clicks cheap.
+        // v1.1 query shape stays, bounded to the four supported packages.
         for (String packageName : LaunchPolicy.SMART_TUBE_ORDER) {
             Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(packageName);
             List<ResolveInfo> resolved = query.query(

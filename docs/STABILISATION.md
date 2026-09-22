@@ -390,6 +390,56 @@ errors/misses and valid recovery are covered; real launcher delivery is not.
 No production dependency, permission, signing material or version was changed.
 The physical-TV and production-signed upgrade gates below remain open.
 
+## Second bug sweep — 22 September 2026
+
+The next sweep used `e84c4bb` as its baseline. The follow-up addresses these
+additional paths without changing versions, permissions, signing or dependencies:
+
+- Preserve title-only focus evidence and invalidate incompatible cached cards.
+  Ambient hero evidence must match the current credible focus title, including
+  a quick click before the panel has updated. Contradictory direct event/node
+  evidence stops dispatch rather than falling through to an old card.
+- Read compatible provider/year evidence from clicked node text and descriptions.
+  A Watch/Play action on the same authoritative detail title retains the selected
+  provider and year across its new click generation. Ordinary new card clicks,
+  different titles and explicit remakes do not inherit that selection's policy.
+- Merge an explicit description year even when event text already supplies a
+  provider. Conflicting explicit years/providers fail closed.
+- Accept numeric movie titles only in recognized non-YouTube provider title slots
+  or authoritative detail rows: one to four ASCII digits, no leading zero.
+  Bare event numbers, YouTube counters, ratings, runtimes and ads stay rejected.
+- Treat repeated TMDB identities as retryable incomplete results, including
+  ignored person rows; matching waits for a complete distinct result set.
+- Make cancellation and final installer ownership mutually exclusive. Once a
+  worker owns the handoff, Settings shows system confirmation instead of claiming
+  cancellation, and a second update cannot replace it. Abandoned unsealed sessions
+  recovered without a live worker become retryable failures; sealed/live sessions
+  remain pending. Android still owns installation approval.
+- Resolve current SmartTube handlers on each selection in the existing package
+  order. Refresh visible Settings on heartbeat changes/expiry, and keep the release
+  button's label consistent with its action after a permission failure.
+
+New tests exercise real service event dispatch, compatible and contradictory node
+evidence, detail-action/new-card isolation, mutable package-query results, actual
+Settings lifecycle/preferences and real uncommitted installer sessions. Small
+acquisition boundaries substitute source nodes, detail/window extraction, package
+queries and final system commitment; proprietary launcher delivery and an actual
+self-update remain outside this suite. The installer concurrency test synchronizes
+at the production handoff boundary rather than relying on a timing race.
+
+The regression-only CI commit is `994ed736aaa816a6ccecbc373b9a2c704e1fcfd1`
+(tree `3f0c5c7bf09cc1292560221b114414dff19127dc`). Its production algorithms are
+unchanged, with behavior-preserving test boundaries added. Results for this
+negative control and the final fixed revision are recorded on
+[PR #20](https://github.com/xantipater/GTV2STREAM/pull/20).
+
+Local compilation uses the official API-34 Android jar and AndroidX/JUnit jars
+with compile-only resource constants. The actual helper suite passes 606
+assertions after the fixes. A standalone JVM run of the actual TMDB test methods
+using JSON-Java has 15 passes/5 failures before the fix and 20 passes afterward.
+Neither result substitutes for Android resource linking, lint, packaging or
+instrumentation; those checks run in the existing API 26/34 CI matrix.
+
 ## Physical-TV and signed-release gates (not completed by this implementation)
 
 1. On an Onn Android 14 device and the supported TCL, focus a YouTube card then

@@ -12,7 +12,9 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Minimal TMDB v3 client. It is called only from the service worker thread. */
 public final class TmdbClient {
@@ -57,6 +59,7 @@ public final class TmdbClient {
         String query = TitleResultHelper.cleanTitle(rawTitle);
         if (query.isEmpty()) return null;
         List<Candidate> candidates = new ArrayList<>();
+        Set<String> receivedIdentities = new HashSet<>();
         int totalPages = -1, totalResults = -1;
         long receivedResults = 0;
         String search = API + "/search/multi?api_key=" + encode(apiKey)
@@ -94,15 +97,25 @@ public final class TmdbClient {
                 JSONObject item = results.optJSONObject(i);
                 if (item == null) throw invalidSearchResults();
                 String mediaType = item.optString("media_type", "");
+                if (!("movie".equals(mediaType) || "tv".equals(mediaType) || "person".equals(mediaType))) {
+                    throw invalidSearchResults();
+                }
+                Object idValue = item.opt("id");
+                if (!(idValue instanceof Number)) throw invalidSearchResults();
+                long id = ((Number) idValue).longValue();
+                if (id <= 0 || ((Number) idValue).doubleValue() != id) throw invalidSearchResults();
+                // Pages are separate requests, not a server snapshot. Ranking
+                // changes can repeat a row while hiding another title without
+                // changing total_results. Every counted row must be distinct,
+                // including people that are not film/series match candidates.
+                if (!receivedIdentities.add(mediaType + ":" + id)) throw invalidSearchResults();
+                if ("person".equals(mediaType)) continue;
                 String titleKey = "movie".equals(mediaType) ? "title" : "name";
                 String dateKey = "movie".equals(mediaType) ? "release_date" : "first_air_date";
-                if ("person".equals(mediaType)) continue;
-                if (!("movie".equals(mediaType) || "tv".equals(mediaType))) throw invalidSearchResults();
-                Object titleValue = item.opt(titleKey), idValue = item.opt("id");
-                if (!(titleValue instanceof String) || !(idValue instanceof Number)) throw invalidSearchResults();
+                Object titleValue = item.opt(titleKey);
+                if (!(titleValue instanceof String)) throw invalidSearchResults();
                 String title = ((String) titleValue).trim();
-                long id = ((Number) idValue).longValue();
-                if (title.isEmpty() || id <= 0 || ((Number) idValue).doubleValue() != id) throw invalidSearchResults();
+                if (title.isEmpty()) throw invalidSearchResults();
                 String date = item.optString(dateKey, "");
                 candidates.add(new Candidate(title, date.length() >= 4 ? date.substring(0, 4) : "",
                         mediaType, id, item.optDouble("popularity", 0.0)));

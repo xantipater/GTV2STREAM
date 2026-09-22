@@ -207,13 +207,18 @@ public final class RecommendationTitleParser {
         }
     }
 
-    /** Enrich matching title evidence without discarding an explicit year. */
+    /** Merge year and provider evidence independently; contradictory evidence cannot identify one selection. */
     static Source withProviderContext(Source primary, Source context) {
         if (primary.isEmpty()) return context;
-        if (primary.hasProvider() || !context.hasProvider()
-                || !TitleResultHelper.compatibleTitles(primary.lookupTitle(), context.lookupTitle())) return primary;
-        return new Source(primary.title, context.youtube, context.provider,
-                primary.year.isEmpty() ? context.year : primary.year);
+        if (context.isEmpty() || !TitleResultHelper.normalizedTitleMatches(primary.title, context.title)) return primary;
+        if (!TitleResultHelper.compatibleTitles(primary.lookupTitle(), context.lookupTitle())
+                || (primary.hasProvider() && context.hasProvider() && !primary.provider.equals(context.provider))) {
+            return Source.NONE;
+        }
+        String provider = primary.hasProvider() ? primary.provider : context.provider;
+        boolean youtube = "youtube".equals(provider);
+        String year = primary.year.isEmpty() ? context.year : primary.year;
+        return new Source(primary.title, youtube, provider, youtube ? "" : year);
     }
 
     private static Source source(String title, boolean youtube) {
@@ -349,7 +354,8 @@ public final class RecommendationTitleParser {
             return rich;
         }
         String title = directWithMaxWords(raw,
-                provider.isEmpty() ? DEFAULT_TITLE_MAX_WORDS : PROVIDER_TITLE_MAX_WORDS);
+                provider.isEmpty() ? DEFAULT_TITLE_MAX_WORDS : PROVIDER_TITLE_MAX_WORDS,
+                allowsNumericTitle(provider));
         return withYear(source(title, "youtube".equals(provider), provider), raw);
     }
 
@@ -472,7 +478,8 @@ public final class RecommendationTitleParser {
             // UI chrome) still applies and is independent of this bound.
             boolean cardEvidence = !edgeProvider.isEmpty();
             String exact = directWithMaxWords(trimEdgePunctuation(base),
-                    cardEvidence ? PROVIDER_TITLE_MAX_WORDS : DEFAULT_TITLE_MAX_WORDS);
+                    cardEvidence ? PROVIDER_TITLE_MAX_WORDS : DEFAULT_TITLE_MAX_WORDS,
+                    allowsNumericTitle(edgeProvider));
             if (!exact.isEmpty()) return source(exact, youtube, edgeProvider);
         }
 
@@ -524,7 +531,7 @@ public final class RecommendationTitleParser {
     private static Source sourceFromCommaMiddle(String[] commas, boolean youtube, String providerId) {
         String rawTitle = trimEdgePunctuation(commas[0]);
         if (rawTitle.isEmpty() || isProviderLoose(rawTitle)) return Source.NONE;
-        String title = directWithMaxWords(rawTitle, PROVIDER_TITLE_MAX_WORDS);
+        String title = directWithMaxWords(rawTitle, PROVIDER_TITLE_MAX_WORDS, allowsNumericTitle(providerId));
         if (title.isEmpty()) return Source.NONE;
         return source(title, youtube, providerId);
     }
@@ -550,10 +557,10 @@ public final class RecommendationTitleParser {
         String provider = !actionProvider.isEmpty() ? actionProvider
                 : leadingProvider ? canonicalProviderId(segments[0])
                 : tailIsProvider ? canonicalProviderId(segments[segments.length - 1]) : "";
-        String first = directWithMaxWords(trimEdgePunctuation(segments[0]), maxWords);
+        String first = directWithMaxWords(trimEdgePunctuation(segments[0]), maxWords, allowsNumericTitle(provider));
         if (!first.isEmpty()) return source(first, youtube, provider);
         if (leadingProvider) {
-            return source(directWithMaxWords(trimEdgePunctuation(segments[1]), maxWords),
+            return source(directWithMaxWords(trimEdgePunctuation(segments[1]), maxWords, allowsNumericTitle(provider)),
                     youtube, provider);
         }
         return Source.NONE;
@@ -605,12 +612,12 @@ public final class RecommendationTitleParser {
      * title) survive. General event/description parsing stays at 7 words.
      */
     public static String fromDetailTitle(String raw) {
-        return directWithMaxWords(raw == null ? "" : raw, 15);
+        return directWithMaxWords(raw == null ? "" : raw, 15, true);
     }
 
     /** Typed variant of {@link #fromDetailTitle}: detail rows never carry a provider marker. */
     public static Source fromDetailTitleSource(String raw) {
-        return withYear(source(directWithMaxWords(raw == null ? "" : raw, 15), false), raw);
+        return withYear(source(directWithMaxWords(raw == null ? "" : raw, 15, true), false), raw);
     }
 
     /**
@@ -677,6 +684,16 @@ public final class RecommendationTitleParser {
     }
 
     private static String directWithMaxWords(String raw, int maxWords) {
+        return directWithMaxWords(raw, maxWords, false);
+    }
+
+    private static boolean allowsNumericTitle(String provider) {
+        // Movie cards have a defined title slot. Ambient YouTube panel text does
+        // not, so its numeric counters keep the existing conservative policy.
+        return !provider.isEmpty() && !"youtube".equals(provider);
+    }
+
+    private static String directWithMaxWords(String raw, int maxWords, boolean trustedNumericTitle) {
         String value = clean(raw);
         if (value.isEmpty() || value.length() > 80) return "";
         String lower = value.toLowerCase(Locale.US);
@@ -699,7 +716,12 @@ public final class RecommendationTitleParser {
                 || lower.endsWith(" mode") || lower.endsWith(" row")) return "";
         if (lower.matches("(?:input|hdmi|aux|av|usb)\\s*\\d*") || value.matches(".*\\$\\d.*")) return "";
         if (value.indexOf('•') >= 0 || value.indexOf('|') >= 0) return "";
-        if (!looksLikeTitle(value, maxWords)) return "";
+        // Numeric films such as 9, 65, 300 and 1917 have no uppercase letter.
+        // Permit only one bounded number in a known provider's movie-title slot
+        // or an authoritative detail row, after all ad/chrome/metadata guards.
+        // Percentages, runtimes, counters, signed values and long IDs stay out.
+        if (!looksLikeTitle(value, maxWords)
+                && !(trustedNumericTitle && value.matches("[1-9][0-9]{0,3}"))) return "";
         return value;
     }
 

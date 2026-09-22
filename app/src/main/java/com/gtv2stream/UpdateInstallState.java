@@ -40,9 +40,16 @@ final class UpdateInstallState {
                 record(context, session(context), PackageInstaller.STATUS_SUCCESS);
                 return PackageInstaller.STATUS_SUCCESS;
             }
+            int sessionId = session(context);
+            // begin() precedes commit(). A live worker owns that short unsealed
+            // interval; after process death no worker can ever finish it.
+            if (ApkUpdater.isHandoffInProgress(sessionId)) return status;
             try {
-                if (context.getPackageManager().getPackageInstaller().getSessionInfo(session(context)) == null) {
-                    record(context, session(context), PackageInstaller.STATUS_FAILURE);
+                PackageInstaller installer = context.getPackageManager().getPackageInstaller();
+                PackageInstaller.SessionInfo info = installer.getSessionInfo(sessionId);
+                if (info == null || !info.isSealed()) {
+                    if (info != null) installer.abandonSession(sessionId);
+                    record(context, sessionId, PackageInstaller.STATUS_FAILURE);
                     return PackageInstaller.STATUS_FAILURE;
                 }
             } catch (RuntimeException unavailable) {

@@ -261,6 +261,17 @@ public class UpdaterLifecycleRuntimeTest {
         assertNotNull(installer.getSessionInfo(session));
     }
 
+    @Test public void queuedPendingPromptCannotOverwriteATerminalInstallerOutcome() throws Exception {
+        int session = pendingSession();
+        RecordingListener listener = new RecordingListener();
+        main(() -> {
+            ApkUpdater.startUpdate(context, null, listener);
+            ApkUpdater.onInstallResult(context, session, PackageInstaller.STATUS_FAILURE_ABORTED, null);
+        });
+        instrumentation.waitForIdleSync();
+        assertEquals(java.util.Collections.singletonList("failure:INSTALL_CANCELLED"), listener.events);
+    }
+
     @Test public void cancelledHandoffNeverPersistsOrCommitsTheSession() throws Exception {
         int session = newSession();
         ApkUpdater.DownloadHandle handle = ownedHandle();
@@ -295,7 +306,9 @@ public class UpdaterLifecycleRuntimeTest {
             RecordingListener retry = new RecordingListener();
             main(() -> {
                 ApkUpdater.cancel(handle);
-                ApkUpdater.startUpdate(context, null, retry);
+                ApkUpdater.DownloadHandle pending = ApkUpdater.startUpdate(context, null, retry);
+                ApkUpdater.cancel(pending);
+                assertFalse("A pending-session handle must not falsely report cancellation", pending.isCancelled());
             });
             instrumentation.waitForIdleSync();
             assertFalse("Cancellation cannot revoke an already claimed handoff", handle.isCancelled());

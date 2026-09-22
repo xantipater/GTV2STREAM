@@ -13,6 +13,8 @@ import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
 import android.provider.Settings;
 import android.text.InputType;
@@ -50,8 +52,15 @@ public final class SettingsActivity extends Activity {
     private ApkUpdater.DownloadHandle updateDownload;
     private ApkUpdater.Listener updateListener;
     private boolean resumed;
+    private static final long SERVICE_HEARTBEAT_MAX_AGE_MS = 60000L;
+    private final Handler statusHandler = new Handler(Looper.getMainLooper());
+    private final Runnable heartbeatExpiry = () -> {
+        if (resumed && !isFinishing() && !isDestroyed() && status != null) updateStatus();
+    };
     private final SharedPreferences.OnSharedPreferenceChangeListener installStatusListener = (prefs, key) -> {
         if (UpdateInstallState.STATUS.equals(key)) refreshInstallStatus();
+        if (AppPrefs.SERVICE_CONNECTED_AT.equals(key)
+                && resumed && !isFinishing() && !isDestroyed() && status != null) updateStatus();
     };
 
     @Override protected void onCreate(Bundle state) {
@@ -76,6 +85,7 @@ public final class SettingsActivity extends Activity {
 
     @Override protected void onPause() {
         resumed = false;
+        statusHandler.removeCallbacks(heartbeatExpiry);
         getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE)
                 .unregisterOnSharedPreferenceChangeListener(installStatusListener);
         super.onPause();
@@ -230,6 +240,7 @@ public final class SettingsActivity extends Activity {
         updateNotice.setText(getString(R.string.update_available, info.version));
         updateNotice.setVisibility(View.VISIBLE);
         updateButton.setVisibility(View.VISIBLE);
+        updateButton.setText(R.string.open_update);
         updateButton.setOnClickListener(v -> openReleasePage(info));
         if (downloadUpdateButton != null) {
             if (info.apkUrl != null) {
@@ -241,7 +252,8 @@ public final class SettingsActivity extends Activity {
             }
         }
         refreshInstallStatus();
-        if (UpdateInstallState.status(this) != android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+        if (!ApkUpdater.isHandoffInProgress()
+                && UpdateInstallState.status(this) != android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
             maybePromptForUpdate(info);
         }
     }
@@ -307,8 +319,9 @@ public final class SettingsActivity extends Activity {
     }
 
     private void startOneTapUpdate() {
-        if (UpdateInstallState.status(this) == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
-            refreshInstallStatus();
+        if (ApkUpdater.isHandoffInProgress()
+                || UpdateInstallState.status(this) == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            showInstallPrompt();
             return;
         }
         if (pendingUpdate == null || pendingUpdate.apkUrl == null) {
@@ -350,10 +363,7 @@ public final class SettingsActivity extends Activity {
             }
 
             @Override public void onInstallPrompt() {
-                runOnUiThread(() -> {
-                    updateDownload = null;
-                    refreshInstallStatus();
-                });
+                runOnUiThread(() -> showInstallPrompt());
             }
 
             @Override public void onInstalled() {
@@ -370,13 +380,12 @@ public final class SettingsActivity extends Activity {
     private void refreshInstallStatus() {
         if (!resumed || isFinishing() || isDestroyed()) return;
         int result = UpdateInstallState.status(this);
-        if (result == UpdateInstallState.NONE) return;
+        if (result == UpdateInstallState.NONE) {
+            if (ApkUpdater.isHandoffInProgress()) showInstallPrompt();
+            return;
+        }
         if (result == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
-            setUpdateStatus(getString(R.string.update_confirm_install));
-            if (downloadUpdateButton != null) {
-                downloadUpdateButton.setEnabled(false);
-                downloadUpdateButton.setText(R.string.update_confirm_install);
-            }
+            showInstallPrompt();
             return;
         }
         // A persisted result may arrive after the original download listener
@@ -397,10 +406,23 @@ public final class SettingsActivity extends Activity {
     }
 
     private void cancelOneTapUpdate() {
-        ApkUpdater.cancel(updateDownload);
+        if (!ApkUpdater.cancel(updateDownload)) {
+            showInstallPrompt();
+            return;
+        }
         updateDownload = null;
         resetDownloadButton();
         setUpdateStatus(getString(R.string.update_cancelled));
+    }
+
+    private void showInstallPrompt() {
+        if (isFinishing() || isDestroyed()) return;
+        updateDownload = null;
+        setUpdateStatus(getString(R.string.update_confirm_install));
+        if (downloadUpdateButton != null) {
+            downloadUpdateButton.setEnabled(false);
+            downloadUpdateButton.setText(R.string.update_confirm_install);
+        }
     }
 
     private void resetDownloadButton() {
@@ -438,6 +460,7 @@ public final class SettingsActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        statusHandler.removeCallbacks(heartbeatExpiry);
         getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE)
                 .unregisterOnSharedPreferenceChangeListener(installStatusListener);
         ApkUpdater.cancel(updateDownload);
@@ -692,6 +715,18 @@ public final class SettingsActivity extends Activity {
         if (appInfoButton != null) {
             appInfoButton.setVisibility(showAppInfoFix ? View.VISIBLE : View.GONE);
         }
+        // A late connection updates via preferences; a missing next heartbeat
+        // needs its own deadline so an open screen cannot remain Ready forever.
+        statusHandler.removeCallbacks(heartbeatExpiry);
+        long at = getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE)
+                .getLong(AppPrefs.SERVICE_CONNECTED_AT, 0L);
+        long age = System.currentTimeMillis() - at;
+        if (resumed && connected) {
+            // If rendering crossed the deadline, perform one immediate recheck.
+            long delay = Math.max(1L, Math.min(SERVICE_HEARTBEAT_MAX_AGE_MS,
+                    SERVICE_HEARTBEAT_MAX_AGE_MS - age));
+            statusHandler.postDelayed(heartbeatExpiry, delay);
+        }
     }
 
     /**
@@ -715,7 +750,8 @@ public final class SettingsActivity extends Activity {
         long at = getSharedPreferences(AppPrefs.PREFS, MODE_PRIVATE)
                 .getLong(AppPrefs.SERVICE_CONNECTED_AT, 0L);
         // Allow up to four heartbeat intervals; the service rewrites it every 15 s.
-        return at > 0L && System.currentTimeMillis() - at < 60000L;
+        long age = System.currentTimeMillis() - at;
+        return at > 0L && age >= 0L && age < SERVICE_HEARTBEAT_MAX_AGE_MS;
     }
 
     /**
