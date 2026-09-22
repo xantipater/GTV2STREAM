@@ -10,6 +10,7 @@ public final class MatchingBoundaryTest {
         checks = 0;
         if (args.length == 0 || "years".equals(args[0])) yearEvidence();
         if (args.length == 0 || "numeric".equals(args[0])) numericTitleSlots();
+        if (args.length == 0 || "brackets".equals(args[0])) bracketedTitles();
         System.out.println("MatchingBoundaryTest: PASS (" + checks + " checks)");
     }
 
@@ -17,6 +18,7 @@ public final class MatchingBoundaryTest {
         checks = 0;
         yearEvidence();
         numericTitleSlots();
+        bracketedTitles();
         return checks;
     }
 
@@ -101,10 +103,58 @@ public final class MatchingBoundaryTest {
                 "numeric provider card keeps sponsored rejection");
         check(RecommendationTitleParser.fromDescription("Advertisement. 1917. Watch on Netflix").isEmpty(),
                 "numeric provider card keeps advertisement rejection");
+        check(RecommendationTitleParser.isRejectedPayload("Ad"),
+                "standalone ad badge is positive terminal evidence");
         check(RecommendationTitleParser.fromEventText(Arrays.asList("1917", "Sponsored", "Watch on Netflix")).isEmpty(),
                 "numeric event title does not bypass rejection elsewhere in the event");
         check(RecommendationTitleParser.fromDetailTitle("Sponsored 1917").isEmpty(),
                 "authoritative detail title keeps sponsored rejection");
+    }
+
+    private static void bracketedTitles() {
+        check("[REC]".equals(RecommendationTitleParser.fromDescription(
+                "[REC]. Watch on Netflix")), "bracketed film title survives provider parsing");
+        check("[REC] 2".equals(RecommendationTitleParser.fromDescription(
+                "[REC] 2. Watch on Netflix")), "bracketed sequel is not reduced to its number");
+        check("[REC]".equals(RecommendationTitleParser.fromDetailTitle("[REC]")),
+                "authoritative detail preserves bracketed title punctuation");
+        check("[REC] 2".equals(RecommendationTitleParser.fromEventText(
+                Arrays.asList("[REC] 2", "Watch on Netflix"))),
+                "provider-bearing event preserves bracketed sequel");
+        check("[REC] 2".equals(TitleResultHelper.cleanTitle("[REC] 2 (2009) [IMAX]")),
+                "year and safe trailing presentation badge are removed without losing title brackets");
+        check("[REC] 2 (2009)".equals(RecommendationTitleParser.fromDescriptionSource(
+                "[REC] 2 [IMAX] (2009). Watch on Netflix").lookupTitle()),
+                "safe presentation badge between title and year does not hide year metadata");
+        check("Dune [Part Two]".equals(TitleResultHelper.cleanTitle("Dune [Part Two]")),
+                "unknown trailing brackets remain title text");
+        check(RecommendationTitleParser.fromDescription(
+                "[REC] 2 [Sponsored]. Watch on Netflix").isEmpty(),
+                "bracket preservation cannot hide sponsored content");
+        check(RecommendationTitleParser.fromDetailTitle("[REC] [Advertisement]").isEmpty(),
+                "authoritative detail keeps advertisement rejection terminal");
+        check(RecommendationTitleParser.isRejectedPayload("[Ad] Dune. Watch on Netflix"),
+                "bounded bracketed ad badge is terminal payload evidence");
+        check(RecommendationTitleParser.fromDescription("[Ad] Dune. Watch on Netflix").isEmpty(),
+                "bracket preservation cannot turn an ad-labelled card into Dune");
+        check(RecommendationTitleParser.fromEventText(
+                Arrays.asList("[Ad] Dune", "Watch on Netflix")).isEmpty(),
+                "event parsing rejects a bracketed ad badge");
+        check(RecommendationTitleParser.fromDetailTitle("[Ad] Dune").isEmpty(),
+                "authoritative detail parsing rejects a bracketed ad badge");
+        check(RecommendationTitleParser.youtubeSource("[Ad] Dune").isEmpty(),
+                "ambient YouTube parsing rejects a bracketed ad badge");
+
+        TmdbClient.Candidate sequel = new TmdbClient.Candidate("[REC] 2", "2009", "movie", 44363, 1);
+        TmdbClient.Candidate unrelated = new TmdbClient.Candidate("2", "2007", "movie", 2, 100);
+        check(TitleResultHelper.chooseBest("[REC] 2", Arrays.asList(sequel, unrelated)) == sequel,
+                "exact matching cannot redirect a bracketed sequel to numeric title 2");
+        check(TitleResultHelper.chooseBest("[REC]", Arrays.asList(
+                new TmdbClient.Candidate("[REC]", "2007", "movie", 8329, 1))) != null,
+                "exact matching retains a wholly bracketed title");
+        check("https://www.youtube.com/results?search_query=%5BREC%5D+2".equals(
+                TitleResultHelper.youtubeSearchUri("[REC] 2")),
+                "outbound title query encodes rather than strips brackets");
     }
 
     private static void check(boolean condition, String message) {

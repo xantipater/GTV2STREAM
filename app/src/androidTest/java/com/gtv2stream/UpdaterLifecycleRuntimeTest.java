@@ -374,6 +374,27 @@ public class UpdaterLifecycleRuntimeTest {
         assertEquals(UpdateInstallState.NONE, UpdateInstallState.status(context));
     }
 
+    @Test public void installerHandoffFailureIsNotReportedAsANetworkFailure() throws Exception {
+        RecordingListener ioListener = new RecordingListener();
+        ApkUpdater.DownloadHandle ioHandle = ownedHandle();
+        field(ApkUpdater.class, "pendingListener", ioListener);
+
+        ApkUpdater.finishInstallerHandoff(null, ioHandle, ioListener,
+                () -> { throw new java.io.IOException("synthetic local installer failure"); });
+        instrumentation.waitForIdleSync();
+        assertEquals(java.util.Collections.singletonList("failure:INSTALL_FAILED"), ioListener.events);
+
+        RecordingListener runtimeListener = new RecordingListener();
+        ApkUpdater.DownloadHandle runtimeHandle = ownedHandle();
+        field(ApkUpdater.class, "pendingListener", runtimeListener);
+        ApkUpdater.finishInstallerHandoff(null, runtimeHandle, runtimeListener,
+                () -> { throw new SecurityException("synthetic installer rejection"); });
+        instrumentation.waitForIdleSync();
+
+        assertEquals(java.util.Collections.singletonList("failure:INSTALL_FAILED"), runtimeListener.events);
+        assertNull(field(ApkUpdater.class, "pendingListener"));
+    }
+
     @Test public void restoredUnsealedSessionIsAbandonedAndSettingsAllowsRetry() throws Exception {
         int session = newSession();
         assertTrue(UpdateInstallState.begin(context, session, "9.0.0"));

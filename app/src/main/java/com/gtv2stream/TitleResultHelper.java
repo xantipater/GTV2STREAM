@@ -10,7 +10,15 @@ import java.util.regex.Pattern;
 /** Pure title matching and Nuvio URI logic, kept separate for deterministic tests. */
 public final class TitleResultHelper {
     private static final Pattern YEAR = Pattern.compile("\\(((?:19|20)\\d{2})\\)");
-    private static final Pattern BRACKETED = Pattern.compile("\\[[^]]*]");
+    /**
+     * Presentation badges known to be metadata rather than part of a title.
+     * Keep this list bounded: films such as [REC] and [REC] 2 use square
+     * brackets as title punctuation and must reach TMDB unchanged.
+     */
+    private static final String PRESENTATION_BADGE_CONTENT =
+            "(?:imax|4k|uhd|hd|hdr(?:10\\+?)?|dolby\\s+(?:vision|atmos)|atmos|cc)";
+    private static final Pattern PRESENTATION_BADGE = Pattern.compile(
+            "(?iu)\\[" + PRESENTATION_BADGE_CONTENT + "\\]");
     private static final Pattern YEAR_PAREN = Pattern.compile("\\((?:19|20)\\d{2}\\)");
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final Pattern NON_ALNUM_RUN = Pattern.compile("[^\\p{L}\\p{N}]+");
@@ -20,7 +28,7 @@ public final class TitleResultHelper {
     public static String cleanTitle(String raw) {
         if (raw == null) return "";
         String value = raw.replace('\n', ' ').replace('\r', ' ').trim();
-        value = BRACKETED.matcher(value).replaceAll(" ");
+        value = PRESENTATION_BADGE.matcher(value).replaceAll(" ");
         value = YEAR_PAREN.matcher(value).replaceAll(" ");
         return WHITESPACE.matcher(value).replaceAll(" ").trim();
     }
@@ -71,7 +79,8 @@ public final class TitleResultHelper {
      */
     public static String yearForTitle(String raw, String title) {
         if (raw == null || title == null || title.isEmpty()) return "";
-        String value = WHITESPACE.matcher(BRACKETED.matcher(raw).replaceAll(" ")).replaceAll(" ");
+        String value = WHITESPACE.matcher(
+                PRESENTATION_BADGE.matcher(raw).replaceAll(" ")).replaceAll(" ");
         Matcher occurrence = Pattern.compile("(?iu)(?<![\\p{L}\\p{N}])" + Pattern.quote(title)
                 + "(?![\\p{L}\\p{N}])").matcher(value);
         if (occurrence.find()) {

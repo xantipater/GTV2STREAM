@@ -27,8 +27,8 @@ public final class RecommendationTitleParser {
                     + "|included\\s+with)\\s+[^.,]+[.!?]?\\s*$");
     private static final Pattern AVAILABLE_ACTION_SUFFIX = Pattern.compile(
             "(?i)\\bavailable\\s+on\\s+([^.,]+)[.!?]?\\s*$");
-    private static final Pattern BRACKETED = Pattern.compile("\\[[^]]*]");
-    private static final Pattern YEAR_PAREN = Pattern.compile("\\((?:19|20)\\d{2}\\)");
+    /** A bounded accessibility ad badge; legitimate bracketed titles such as [REC] do not match. */
+    private static final Pattern BRACKETED_AD = Pattern.compile("(?iu)\\[\\s*ad\\s*]");
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     /** Captures the provider name of any recognised watch-action suffix. */
     private static final Pattern ACTION_PROVIDER = Pattern.compile(
@@ -331,7 +331,8 @@ public final class RecommendationTitleParser {
     static boolean isRejectedPayload(String raw) {
         String lower = clean(raw).toLowerCase(Locale.US);
         return lower.contains("sponsored") || lower.contains("advertisement")
-                || lower.startsWith("ad ") || lower.contains("learn more")
+                || BRACKETED_AD.matcher(lower).find()
+                || lower.equals("ad") || lower.startsWith("ad ") || lower.contains("learn more")
                 || lower.contains("install app") || lower.contains("download app");
     }
 
@@ -388,8 +389,7 @@ public final class RecommendationTitleParser {
         String value = clean(raw);
         if (value.isEmpty()) return Source.NONE;
 
-        String lowerValue = value.toLowerCase(Locale.US);
-        if (lowerValue.contains("sponsored") || lowerValue.contains("advertisement")) return Source.NONE;
+        if (isRejectedPayload(value)) return Source.NONE;
         // Source construction derives the route from recognised provider identity.
         boolean youtube = false;
 
@@ -649,8 +649,7 @@ public final class RecommendationTitleParser {
     public static Source youtubeSource(String raw) {
         String value = clean(raw == null ? "" : raw);
         String lower = value.toLowerCase(Locale.US);
-        if (value.isEmpty() || value.length() > 150
-                || lower.contains("sponsored") || lower.contains("advertisement")) {
+        if (value.isEmpty() || value.length() > 150 || isRejectedPayload(value)) {
             return Source.NONE;
         }
         // The panel scan reads every text node in every window, so launcher
@@ -698,9 +697,7 @@ public final class RecommendationTitleParser {
         if (value.isEmpty() || value.length() > 80) return "";
         String lower = value.toLowerCase(Locale.US);
         if (UI_WORDS.contains(lower) || PROVIDERS.contains(lower) || GRID_LABEL.matcher(value).matches()) return "";
-        if (lower.contains("sponsored") || lower.contains("advertisement")
-                || lower.startsWith("ad ") || lower.contains("learn more")
-                || lower.contains("install app") || lower.contains("download app")) return "";
+        if (isRejectedPayload(value)) return "";
         if (lower.matches("season\\s+\\d+.*") || lower.matches("episode\\s+\\d+.*")
                 || lower.contains("watch on") || lower.contains("stream on")
                 || lower.contains("watch now on")) return "";
@@ -742,6 +739,7 @@ public final class RecommendationTitleParser {
         String[] words = value.split("\\s+");
         if (words.length > maxWords) return false;
 
+        boolean bracketedTitle = value.matches("^\\[[^]]+]\\s+\\d+$");
         int titleCaseWords = 0;
         int lowerContentWords = 0;
         for (String word : words) {
@@ -751,7 +749,8 @@ public final class RecommendationTitleParser {
             boolean hasUpper = !letters.equals(letters.toLowerCase(Locale.US));
             boolean startsUpper = Character.isUpperCase(letters.charAt(0));
             if (startsUpper || hasUpper) titleCaseWords++;
-            else if (!TITLE_STOP_WORDS.contains(lower)) lowerContentWords++;
+            else if (!(bracketedTitle && letters.matches("\\d+"))
+                    && !TITLE_STOP_WORDS.contains(lower)) lowerContentWords++;
         }
 
         // Long all-lowercase prose is the common accessibility/synopsis false positive.
@@ -785,11 +784,7 @@ public final class RecommendationTitleParser {
     }
 
     private static String clean(String raw) {
-        if (raw == null) return "";
-        String value = raw.replace('\n', ' ').replace('\r', ' ');
-        value = BRACKETED.matcher(value).replaceAll(" ");
-        value = YEAR_PAREN.matcher(value).replaceAll(" ");
-        return WHITESPACE.matcher(value).replaceAll(" ").trim();
+        return TitleResultHelper.cleanTitle(raw);
     }
 
     private static Set<String> setOf(String... values) {

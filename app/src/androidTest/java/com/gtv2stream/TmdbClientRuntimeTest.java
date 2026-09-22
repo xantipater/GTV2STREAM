@@ -42,6 +42,17 @@ public class TmdbClientRuntimeTest {
         assertEquals(Arrays.asList("/3/search/multi", "/3/movie/841/external_ids"), network.paths());
     }
 
+    @Test public void bracketedTitleIsEncodedAndMatchedWithoutBecomingNumericTitle() throws Exception {
+        ScriptedTransport network = new ScriptedTransport(1,
+                page(1, 1, 2, movie("[REC] 2", 2009, 841), movie("2", 2007, 2)), EXTERNAL);
+        TitleMatch match = new TmdbClient(KEY, network).searchBest("[REC] 2");
+        assertNotNull(match);
+        assertEquals(841, match.tmdbId);
+        assertEquals("[REC] 2", match.title);
+        assertTrue(network.requests.get(0).contains("&query=%5BREC%5D+2&include_adult=false"));
+        assertEquals(Arrays.asList("/3/search/multi", "/3/movie/841/external_ids"), network.paths());
+    }
+
     @Test public void uniqueExactTitleOnSecondPageIsFoundBeforeExternalLookup() throws Exception {
         ScriptedTransport network = new ScriptedTransport(2,
                 page(1, 2, 3, movie("Dune: Part Two", 2024, 693134)),

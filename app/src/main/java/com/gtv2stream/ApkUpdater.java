@@ -278,7 +278,8 @@ final class ApkUpdater {
                 postFailure(handle, listener, UpdateChecker.Failure.UNKNOWN_SOURCES);
                 return;
             }
-            commitInstall(context, apk, info.version, handle, listener);
+            finishInstallerHandoff(apk, handle, listener,
+                    () -> commitInstall(context, apk, info.version, handle, listener));
         } catch (SocketTimeoutException timeout) {
             deleteQuietly(apk);
             postFailure(handle, listener, UpdateChecker.Failure.TIMEOUT);
@@ -434,6 +435,19 @@ final class ApkUpdater {
             throw error instanceof IOException ? (IOException) error : new IOException(error);
         }
     }
+
+    /** Installer/session failures are local handoff failures, not transport failures. */
+    static void finishInstallerHandoff(File apk, DownloadHandle handle, Listener listener,
+            InstallOperation install) {
+        try {
+            install.run();
+        } catch (IOException | RuntimeException failure) {
+            deleteQuietly(apk);
+            postFailure(handle, listener, UpdateChecker.Failure.INSTALL_FAILED);
+        }
+    }
+
+    interface InstallOperation { void run() throws IOException; }
 
     /** Final handoff boundary; tests replace only the system commit operation. */
     static boolean handoffInstall(Context context, int sessionId, String version,

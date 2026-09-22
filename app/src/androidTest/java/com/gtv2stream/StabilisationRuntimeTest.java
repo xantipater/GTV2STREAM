@@ -121,6 +121,69 @@ public class StabilisationRuntimeTest {
         assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
     }
 
+    @Test public void changedFocusBoundsRetireColumnOnlyCardCache() throws Exception {
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, new Rect(0, 0, 100, 100),
+                "Big Buck Bunny", "Big Buck Bunny. Watch on YouTube",
+                "Big Buck Bunny", "Watch on YouTube");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, new Rect(200, 0, 300, 100),
+                "Column 4", "", "Column 4");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, new Rect(200, 0, 300, 100),
+                "Column 4", "", "Column 4");
+        stockYoutube(); drain();
+        assertTrue(service.launched.isEmpty());
+    }
+
+    @Test public void sameCardBoundsPreserveColumnOnlyYoutubeFallback() throws Exception {
+        Rect card = new Rect(0, 0, 100, 100);
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, card,
+                "Big Buck Bunny", "Big Buck Bunny. Watch on YouTube",
+                "Big Buck Bunny", "Watch on YouTube");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, card, "Column 3", "", "Column 3");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, card, "Column 3", "", "Column 3");
+        drain();
+        assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
+    }
+
+    @Test public void sameCardContainerToInnerColumnPreservesFallback() throws Exception {
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, new Rect(0, 0, 200, 200),
+                "Big Buck Bunny", "Big Buck Bunny. Watch on YouTube",
+                "Big Buck Bunny", "Watch on YouTube");
+        Rect inner = new Rect(20, 20, 180, 180);
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, inner,
+                "Column 3", "", "Column 3");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, inner,
+                "Column 3", "", "Column 3");
+        drain();
+        assertEquals(Collections.singletonList("youtube:Big Buck Bunny"), service.launched);
+    }
+
+    @Test public void changedColumnIdentityRetiresCacheAtReusedBounds() throws Exception {
+        Rect reused = new Rect(0, 0, 100, 100);
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, reused,
+                "Big Buck Bunny", "Big Buck Bunny. Watch on YouTube",
+                "Big Buck Bunny", "Watch on YouTube");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, reused,
+                "Column 3", "", "Column 3");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, reused,
+                "Column 4", "", "Column 4");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, reused,
+                "Column 4", "", "Column 4");
+        drain();
+        assertTrue(service.launched.isEmpty());
+    }
+
+    @Test public void sameTitleOnDifferentCardCannotInheritYoutubeRoute() throws Exception {
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, new Rect(0, 0, 100, 100),
+                "Dune", "Dune. Watch on YouTube", "Dune", "Watch on YouTube");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED, new Rect(200, 0, 300, 100),
+                "Dune", "", "Dune");
+        boundedNodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, new Rect(200, 0, 300, 100),
+                "Dune", "", "Dune");
+        drain();
+        assertEquals(Collections.singletonList("movie:Dune"), service.launched);
+        assertEquals(Collections.singletonList("Dune"), service.lookedUp);
+    }
+
     @Test public void titleOnlyFocusRejectsStaleAmbientPanelOnImmediateClick() throws Exception {
         main(() -> service.windowPayload = RecommendationTitleParser.youtubeSource("Big Buck Bunny"));
         focus("Big Buck Bunny", "Watch on YouTube");
@@ -171,6 +234,39 @@ public class StabilisationRuntimeTest {
         assertEquals(Collections.singletonList("movie:Alien"), service.launched);
     }
 
+    @Test public void providerlessClickUsesCompatibleSpatialProviderPolicy() throws Exception {
+        whitelist("prime video");
+        main(() -> service.clickedRecovery = TvRecommendationService.ClickedNodeSource.found(
+                RecommendationTitleParser.fromDescriptionSource("Dune. Watch on Prime Video")));
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Dune", "", "Dune");
+        drain();
+        assertTrue(service.lookedUp.isEmpty());
+        assertTrue(service.launched.isEmpty());
+    }
+
+    @Test public void terminalSpatialEvidenceStopsCompleteDirectDispatch() throws Exception {
+        main(() -> service.clickedRecovery = TvRecommendationService.ClickedNodeSource.TERMINAL);
+        nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Dune",
+                "Dune. Watch on Prime Video", "Dune", "Watch on Prime Video");
+        drain();
+        assertTrue(service.lookedUp.isEmpty());
+        assertTrue(service.launched.isEmpty());
+    }
+
+    @Test public void bracketedFilmSelectionReachesLookupAndLaunchUnchanged() throws Exception {
+        click("[REC] 2", "Watch on Netflix");
+        drain();
+        assertEquals(Collections.singletonList("[REC] 2"), service.lookedUp);
+        assertEquals(Collections.singletonList("movie:[REC] 2"), service.launched);
+    }
+
+    @Test public void bracketedAdBadgeIsTerminalBeforeLookup() throws Exception {
+        click("[Ad] Dune", "Watch on Netflix");
+        drain();
+        assertTrue(service.lookedUp.isEmpty());
+        assertTrue(service.launched.isEmpty());
+    }
+
     @Test public void compatibleClickedNodeYoutubeProviderChoosesYoutubeRoute() throws Exception {
         nodeEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "Big Buck Bunny",
                 "Big Buck Bunny. Watch on YouTube", "Big Buck Bunny");
@@ -204,6 +300,112 @@ public class StabilisationRuntimeTest {
                 "Dune", "Watch on Netflix");
         drain();
         assertTrue(service.launched.isEmpty());
+    }
+
+    @Test public void nearbyCardSelectionUsesClosestBoundsNotTraversalOrder() {
+        main(() -> {
+            AccessibilityNodeInfo adjacent = nearbyNode(new Rect(0, 0, 100, 100),
+                    "", "Alien. Watch on Netflix");
+            AccessibilityNodeInfo clicked = nearbyNode(new Rect(110, 0, 210, 100),
+                    "", "Dune. Watch on Prime Video");
+            try {
+                RecommendationTitleParser.Source found = service.selectNearbySource(
+                        Arrays.asList(adjacent, clicked), new Rect(110, 0, 210, 100));
+                assertEquals("Dune", found.lookupTitle());
+                assertEquals("prime video", found.provider);
+            } finally {
+                adjacent.recycle();
+                clicked.recycle();
+            }
+        });
+    }
+
+    @Test public void nearbyCardSelectionSkipsColumnBeforePayload() {
+        main(() -> {
+            Rect bounds = new Rect(110, 0, 210, 100);
+            AccessibilityNodeInfo column = nearbyNode(bounds, "Column 4", "");
+            AccessibilityNodeInfo payload = nearbyNode(bounds, "", "Dune. Watch on Prime Video");
+            try {
+                RecommendationTitleParser.Source found = service.selectNearbySource(
+                        Arrays.asList(column, payload), bounds);
+                assertEquals("Dune", found.lookupTitle());
+                assertEquals("prime video", found.provider);
+            } finally {
+                column.recycle();
+                payload.recycle();
+            }
+        });
+    }
+
+    @Test public void oneCardSubtreeCombinesSplitTitleAndProvider() {
+        main(() -> {
+            RecommendationTitleParser.Source found = service.selectCardValues(
+                    Arrays.<CharSequence>asList("Column 4", "Dune", "Watch on Prime Video"));
+            assertEquals("Dune", found.lookupTitle());
+            assertEquals("prime video", found.provider);
+        });
+    }
+
+    @Test public void equallyCloseDifferentCardsFailClosed() {
+        main(() -> {
+            Rect bounds = new Rect(110, 0, 210, 100);
+            AccessibilityNodeInfo first = nearbyNode(bounds, "", "Alien. Watch on Netflix");
+            AccessibilityNodeInfo second = nearbyNode(bounds, "", "Dune. Watch on Prime Video");
+            try {
+                RecommendationTitleParser.Source found = service.selectNearbySource(
+                        Arrays.asList(first, second), bounds);
+                assertTrue(found.isEmpty());
+            } finally {
+                first.recycle();
+                second.recycle();
+            }
+        });
+    }
+
+    @Test public void separatedSponsoredMarkerMakesNearbySelectionTerminal() {
+        main(() -> {
+            Rect clicked = new Rect(110, 0, 210, 100);
+            for (String marker : Arrays.asList("Sponsored", "Ad")) {
+                AccessibilityNodeInfo title = nearbyNode(clicked, "Dune", "");
+                AccessibilityNodeInfo badge = nearbyNode(
+                        new Rect(110, 100, 210, 140), marker, "");
+                try {
+                    assertTrue(marker, service.selectNearbySource(
+                            Arrays.asList(title, badge), clicked).isEmpty());
+                } finally {
+                    title.recycle();
+                    badge.recycle();
+                }
+            }
+        });
+    }
+
+    @Test public void exhaustedNearbyScanCannotHideLaterSponsoredMarker() {
+        main(() -> {
+            Rect clicked = new Rect(110, 0, 210, 100);
+            List<AccessibilityNodeInfo> nodes = new ArrayList<>();
+            try {
+                nodes.add(nearbyNode(new Rect(0, 0, 100, 100),
+                        "", "Alien. Watch on Netflix"));
+                for (int index = 0; index < 255; index++) {
+                    nodes.add(nearbyNode(new Rect(1000 + index, 1000, 1001 + index, 1001), "", ""));
+                }
+                nodes.add(nearbyNode(clicked, "Sponsored", ""));
+                assertTrue(service.selectNearbySource(nodes, clicked).isEmpty());
+            } finally {
+                for (AccessibilityNodeInfo node : nodes) node.recycle();
+            }
+        });
+    }
+
+    @Test public void oversizedCardValueSetFailsClosed() {
+        main(() -> {
+            List<CharSequence> values = new ArrayList<>();
+            values.add("Dune");
+            values.add("Watch on Prime Video");
+            while (values.size() <= 32) values.add("metadata " + values.size());
+            assertTrue(service.selectCardValues(values).isEmpty());
+        });
     }
 
     @Test public void entityPlaybackActionKeepsConsumedWhitelistAndYear() throws Exception {
@@ -898,6 +1100,26 @@ public class StabilisationRuntimeTest {
             finally { service.eventNode = null; node.recycle(); event.recycle(); }
         });
     }
+    private void boundedNodeEvent(int type, Rect bounds,
+            String nodeText, String nodeDescription, String... values) {
+        main(() -> {
+            AccessibilityNodeInfo node = AccessibilityNodeInfo.obtain();
+            node.setBoundsInScreen(bounds);
+            node.setText(nodeText);
+            node.setContentDescription(nodeDescription);
+            service.eventNode = node;
+            AccessibilityEvent event = event(type, HOME, values);
+            try { deliverToService(event); }
+            finally { service.eventNode = null; node.recycle(); event.recycle(); }
+        });
+    }
+    private static AccessibilityNodeInfo nearbyNode(Rect bounds, String text, String description) {
+        AccessibilityNodeInfo node = AccessibilityNodeInfo.obtain();
+        node.setBoundsInScreen(bounds);
+        node.setText(text);
+        node.setContentDescription(description);
+        return node;
+    }
     // The unbound service fixture cannot expose a live entity title tree. Enter
     // its actual detail dispatch after extraction, as the earlier detail tests do.
     private void detail(String title, String provider) { main(() -> dispatchDetail(title, provider)); }
@@ -979,6 +1201,7 @@ public class StabilisationRuntimeTest {
         AccessibilityNodeInfo eventNode;
         String detailTitle;
         RecommendationTitleParser.Source windowPayload;
+        TvRecommendationService.ClickedNodeSource clickedRecovery;
         TestService(Context base) { attachBaseContext(base); }
         @Override public AccessibilityNodeInfo getRootInActiveWindow() { return root; }
         @Override AccessibilityNodeInfo eventSource(AccessibilityEvent event) {
@@ -994,6 +1217,9 @@ public class StabilisationRuntimeTest {
             // Replace extraction from an unbound live window, never the focus
             // identity check or click/fallback orchestration under test.
             return windowPayload == null ? super.readWindowSource() : windowPayload;
+        }
+        @Override TvRecommendationService.ClickedNodeSource sourceFromClickedNode(AccessibilityEvent event) {
+            return clickedRecovery == null ? super.sourceFromClickedNode(event) : clickedRecovery;
         }
         @Override TitleMatch lookupTitle(String key, String title) throws IOException {
             assertNotSame(Looper.getMainLooper(), Looper.myLooper());

@@ -52,6 +52,14 @@ public class TvRecommendationService extends AccessibilityService {
     private RecommendationTitleParser.Source focusedHeroSource =
             RecommendationTitleParser.Source.NONE;
     private long focusedHeroCapturedAt;
+    /** Focus identity that owns the cached card/panel evidence below. */
+    private long focusEpoch;
+    private long focusedHeroEpoch = -1L;
+    private long lastCardEpoch = -1L;
+    private final android.graphics.Rect focusedNodeBounds = new android.graphics.Rect();
+    private boolean hasFocusedNodeBounds;
+    private int focusedNodeWindowId = -1;
+    private String focusedNodeLabel = "";
     /** Direct focus identity constrains slower, weaker ambient-panel evidence. */
     private String focusedTitle = "";
     /**
@@ -210,6 +218,11 @@ public class TvRecommendationService extends AccessibilityService {
             pendingHeroCapture = null;
         }
         clearFocusedHeroSource();
+        focusEpoch++;
+        hasFocusedNodeBounds = false;
+        focusedNodeBounds.setEmpty();
+        focusedNodeWindowId = -1;
+        focusedNodeLabel = "";
         focusedTitle = "";
         clearLastCardSource();
         clearDivert();
@@ -244,25 +257,21 @@ public class TvRecommendationService extends AccessibilityService {
             clearRecommendationContext();
             return;
         }
-        focusedTitle = immediate.lookupTitle();
-        if (incompatibleSource(immediate, lastCardSource)
-                || incompatibleSource(immediate, focusedHeroSource)) {
-            if (pendingHeroCapture != null) handler.removeCallbacks(pendingHeroCapture);
-            pendingHeroCapture = null;
-            clearLastCardSource();
-            clearFocusedHeroSource();
-            clearDivert();
-        }
-        if (isUsableYouTubeSource(immediate)) {
-            // The focused card's payload is the card the user is about to press,
-            // and it is the only source that survives this launcher's click
-            // events, which sometimes expose just the grid label of the card's
-            // container ("Column 3") and nothing else.
-            rememberCard(immediate);
-        }
         AccessibilityNodeInfo source = eventSource(event);
-        if (source != null) {
-            try {
+        try {
+            boolean changedNode = noteFocusedNode(event, source);
+            boolean incompatible = incompatibleSource(immediate, lastCardSource)
+                    || incompatibleSource(immediate, focusedHeroSource);
+            if (changedNode || incompatible) advanceFocusEpoch();
+            focusedTitle = immediate.lookupTitle();
+            if (isUsableYouTubeSource(immediate)) {
+                // The focused card's payload is the card the user is about to press,
+                // and it is the only source that survives this launcher's click
+                // events, which sometimes expose just the grid label of the card's
+                // container ("Column 3") and nothing else.
+                rememberCard(immediate);
+            }
+            if (source != null) {
                 if (!immediate.isEmpty() && immediate.hasProvider()) {
                     if (pendingHeroCapture != null) handler.removeCallbacks(pendingHeroCapture);
                     pendingHeroCapture = null;
@@ -270,6 +279,7 @@ public class TvRecommendationService extends AccessibilityService {
                     else clearLastCardSource();
                     focusedHeroSource = immediate;
                     focusedHeroCapturedAt = SystemClock.elapsedRealtime();
+                    focusedHeroEpoch = focusEpoch;
                     Diagnostics.debug("Cached focused provider title: " + immediate.title
                             + " (" + immediate.provider + ")");
                     return;
@@ -277,20 +287,83 @@ public class TvRecommendationService extends AccessibilityService {
                 android.graphics.Rect bounds = new android.graphics.Rect();
                 source.getBoundsInScreen(bounds);
                 scheduleFocusedHeroCapture(bounds);
-            } finally {
-                source.recycle();
+            } else if (!immediate.isEmpty() && immediate.hasProvider()) {
+                if (pendingHeroCapture != null) handler.removeCallbacks(pendingHeroCapture);
+                pendingHeroCapture = null;
+                if (!immediate.youtube) clearLastCardSource();
+                focusedHeroSource = immediate;
+                focusedHeroCapturedAt = SystemClock.elapsedRealtime();
+                focusedHeroEpoch = focusEpoch;
+                Diagnostics.debug("Cached focused provider title: " + immediate.title
+                        + " (" + immediate.provider + ")");
+            } else {
+                clearFocusedHeroSource();
             }
-        } else if (!immediate.isEmpty() && immediate.hasProvider()) {
-            if (pendingHeroCapture != null) handler.removeCallbacks(pendingHeroCapture);
-            pendingHeroCapture = null;
-            if (!immediate.youtube) clearLastCardSource();
-            focusedHeroSource = immediate;
-            focusedHeroCapturedAt = SystemClock.elapsedRealtime();
-            Diagnostics.debug("Cached focused provider title: " + immediate.title
-                    + " (" + immediate.provider + ")");
-        } else {
-            clearFocusedHeroSource();
+        } finally {
+            if (source != null) source.recycle();
         }
+    }
+
+    /**
+     * Records a usable spatial identity for the focused card. Repeated events on
+     * the same card keep its evidence; moving to another bounded node retires it
+     * even when both events expose only "Column N" or the same title.
+     */
+    private boolean noteFocusedNode(AccessibilityEvent event, AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        android.graphics.Rect bounds = new android.graphics.Rect();
+        node.getBoundsInScreen(bounds);
+        if (bounds.isEmpty()) return false;
+        int windowId = event.getWindowId() >= 0 ? event.getWindowId() : node.getWindowId();
+        String nodeLabel = focusNodeLabel(event, node);
+        boolean windowChanged = focusedNodeWindowId >= 0 && windowId >= 0
+                && focusedNodeWindowId != windowId;
+        boolean labelChanged = !focusedNodeLabel.isEmpty() && !nodeLabel.isEmpty()
+                && !focusedNodeLabel.equals(nodeLabel);
+        boolean sameGeometry = focusedNodeBounds.equals(bounds)
+                || focusedNodeBounds.contains(bounds) || bounds.contains(focusedNodeBounds)
+                || (!focusedNodeLabel.isEmpty() && focusedNodeLabel.equals(nodeLabel)
+                    && substantiallyOverlaps(focusedNodeBounds, bounds));
+        boolean changed = hasFocusedNodeBounds
+                && (windowChanged || labelChanged || !sameGeometry);
+        focusedNodeBounds.set(bounds);
+        hasFocusedNodeBounds = true;
+        focusedNodeWindowId = windowId;
+        if (!nodeLabel.isEmpty()) focusedNodeLabel = nodeLabel;
+        return changed;
+    }
+
+    private static boolean substantiallyOverlaps(
+            android.graphics.Rect first, android.graphics.Rect second) {
+        android.graphics.Rect overlap = new android.graphics.Rect(first);
+        if (!overlap.intersect(second)) return false;
+        long overlapArea = (long) overlap.width() * overlap.height();
+        long smallerArea = Math.min((long) first.width() * first.height(),
+                (long) second.width() * second.height());
+        return smallerArea > 0 && overlapArea * 2L >= smallerArea;
+    }
+
+    private static String focusNodeLabel(AccessibilityEvent event, AccessibilityNodeInfo node) {
+        String viewId = toString(node.getViewIdResourceName()).trim().toLowerCase(java.util.Locale.US);
+        String value = "";
+        if (event.getText() != null && !event.getText().isEmpty()) {
+            value = toString(event.getText().get(0)).trim().toLowerCase(java.util.Locale.US);
+        }
+        if (!value.matches("(?:column|row)\\s+\\d+")) {
+            value = toString(node.getText()).trim().toLowerCase(java.util.Locale.US);
+        }
+        if (!value.matches("(?:column|row)\\s+\\d+")) value = "";
+        if (value.isEmpty()) return "";
+        return viewId.isEmpty() ? value : viewId + "|" + value;
+    }
+
+    private void advanceFocusEpoch() {
+        focusEpoch++;
+        if (pendingHeroCapture != null) handler.removeCallbacks(pendingHeroCapture);
+        pendingHeroCapture = null;
+        clearLastCardSource();
+        clearFocusedHeroSource();
+        clearDivert();
     }
 
     private static boolean incompatibleSource(RecommendationTitleParser.Source current,
@@ -340,9 +413,14 @@ public class TvRecommendationService extends AccessibilityService {
     }
 
     private void scheduleHeroCapture(long delayMs, int attemptsRemaining) {
+        scheduleHeroCapture(delayMs, attemptsRemaining, focusEpoch);
+    }
+
+    private void scheduleHeroCapture(long delayMs, int attemptsRemaining, long expectedEpoch) {
         if (pendingHeroCapture != null) handler.removeCallbacks(pendingHeroCapture);
         pendingHeroCapture = () -> {
             pendingHeroCapture = null;
+            if (expectedEpoch != focusEpoch) return;
             RecommendationTitleParser.Source source = sourceFromWindowPayloads();
             if (source.isEmpty()) {
                 // Never clear a title that is still fresh. On this launcher the
@@ -358,12 +436,13 @@ public class TvRecommendationService extends AccessibilityService {
                 if (attemptsRemaining > 1) {
                     // Hero metadata arrives after the focus event. Poll briefly so a
                     // click made as soon as it becomes visible still has the title.
-                    scheduleHeroCapture(100L, attemptsRemaining - 1);
+                    scheduleHeroCapture(100L, attemptsRemaining - 1, expectedEpoch);
                 }
                 return;
             }
             focusedHeroSource = source;
             focusedHeroCapturedAt = SystemClock.elapsedRealtime();
+            focusedHeroEpoch = focusEpoch;
             Diagnostics.debug("Cached focused YouTube title: " + source.title);
         };
         handler.postDelayed(pendingHeroCapture, delayMs);
@@ -372,10 +451,11 @@ public class TvRecommendationService extends AccessibilityService {
     private void clearFocusedHeroSource() {
         focusedHeroSource = RecommendationTitleParser.Source.NONE;
         focusedHeroCapturedAt = 0;
+        focusedHeroEpoch = -1L;
     }
 
     private boolean hasFreshFocusedHeroSource() {
-        return !focusedHeroSource.isEmpty() && DivertPolicy.isFresh(
+        return focusedHeroEpoch == focusEpoch && !focusedHeroSource.isEmpty() && DivertPolicy.isFresh(
                 focusedHeroCapturedAt, SystemClock.elapsedRealtime(), FOCUSED_HERO_WINDOW_MS);
     }
 
@@ -384,16 +464,22 @@ public class TvRecommendationService extends AccessibilityService {
         if (source == null || source.isEmpty()) return;
         lastCardSource = source;
         lastCardCapturedAt = SystemClock.elapsedRealtime();
+        lastCardEpoch = focusEpoch;
     }
 
     private void clearLastCardSource() {
         lastCardSource = RecommendationTitleParser.Source.NONE;
         lastCardCapturedAt = 0L;
+        lastCardEpoch = -1L;
     }
 
     /** True when a cached source is a YouTube-marked title we can search for. */
     private static boolean isUsableYouTubeSource(RecommendationTitleParser.Source source) {
         return source != null && !source.isEmpty() && source.youtube;
+    }
+
+    private boolean hasCurrentYouTubeCard() {
+        return lastCardEpoch == focusEpoch && isUsableYouTubeSource(lastCardSource);
     }
 
     /**
@@ -419,8 +505,9 @@ public class TvRecommendationService extends AccessibilityService {
         if (!DivertPolicy.isFresh(lastLauncherClickAt, SystemClock.elapsedRealtime(),
                 DivertPolicy.CLICKED_CARD_TTL_MS)) return;
         long now = SystemClock.elapsedRealtime();
-        boolean clickedUsable = isUsableYouTubeSource(lastCardSource);
-        boolean heroUsable = isUsableYouTubeSource(focusedHeroSource);
+        boolean clickedUsable = hasCurrentYouTubeCard();
+        boolean heroUsable = focusedHeroEpoch == focusEpoch
+                && isUsableYouTubeSource(focusedHeroSource);
         DivertPolicy.Choice choice = DivertPolicy.choose(
                 lastCardCapturedAt, clickedUsable,
                 focusedHeroCapturedAt, heroUsable, now);
@@ -612,11 +699,26 @@ public class TvRecommendationService extends AccessibilityService {
                 && TitleResultHelper.compatibleTitles(source.lookupTitle(), focusedHeroSource.lookupTitle())) {
             source = RecommendationTitleParser.withProviderContext(source, focusedHeroSource);
         }
+        // Always inspect the bounded card region. Some cards expose title and
+        // provider in sibling nodes; an ad/sponsored badge can also be separated
+        // from an otherwise complete direct payload and must stay terminal.
+        ClickedNodeSource recovered = sourceFromClickedNode(event);
+        if (recovered.terminal) {
+            interactionSession.invalidate();
+            clearRecommendationContext();
+            return;
+        }
         if (source.isEmpty()) {
-            // Some cards (notably YouTube) emit click events with no text or
-            // description; the payload lives on the card container, an ancestor
-            // of the clicked view.
-            source = sourceFromClickedNode(event);
+            source = recovered.source;
+        } else if (!recovered.source.isEmpty()) {
+            RecommendationTitleParser.Source merged =
+                    mergeDirectSources(source, recovered.source);
+            if (merged == null || merged.isEmpty()) {
+                interactionSession.invalidate();
+                clearRecommendationContext();
+                return;
+            }
+            source = merged;
         }
         if (!source.isEmpty()) {
             // This payload came from the click event or the clicked node, so it
@@ -644,7 +746,7 @@ public class TvRecommendationService extends AccessibilityService {
             // captured when it gained focus. Prefer that over the ambient panel,
             // whose scan reads launcher chrome and once searched YouTube for
             // "Column 3" instead of the card's video.
-            if (isUsableYouTubeSource(lastCardSource)
+            if (hasCurrentYouTubeCard()
                     && DivertPolicy.isFresh(lastCardCapturedAt,
                             SystemClock.elapsedRealtime(), FOCUSED_HERO_WINDOW_MS)) {
                 RecommendationTitleParser.Source cached = lastCardSource;
@@ -693,61 +795,274 @@ public class TvRecommendationService extends AccessibilityService {
      * card's region, feeds those to the classifier, and falls back to the
      * ancestor chain. Nodes are recycled immediately.
      */
-    private RecommendationTitleParser.Source sourceFromClickedNode(AccessibilityEvent event) {
+    ClickedNodeSource sourceFromClickedNode(AccessibilityEvent event) {
         AccessibilityNodeInfo owned = eventSource(event);
-        if (owned == null) return RecommendationTitleParser.Source.NONE;
+        if (owned == null) return ClickedNodeSource.EMPTY;
         try {
             android.graphics.Rect clickBounds = new android.graphics.Rect();
             owned.getBoundsInScreen(clickBounds);
-            List<CharSequence> collected = new ArrayList<>();
+            NearbySource nearby = new NearbySource(clickBounds);
             AccessibilityNodeInfo root = getRootInActiveWindow();
             if (root != null) {
                 try {
                     if (LAUNCHER_PACKAGE.contentEquals(toString(root.getPackageName()))
                             && (event.getWindowId() < 0 || root.getWindowId() == event.getWindowId())) {
-                        collectNearbyPayloadTexts(root, 0, clickBounds, collected);
+                        collectNearbySources(root, 0, nearby, new int[] {256});
                     }
                 } finally {
                     root.recycle();
                 }
             }
-            RecommendationTitleParser.Source found =
-                    RecommendationTitleParser.fromEventTextSource(collected);
-            if (!found.isEmpty()) return found;
-            if (!collected.isEmpty()) {
-                Diagnostics.debug("Card region payload: " + collected);
+            if (nearby.truncated || nearby.ambiguous || nearby.rejected) {
+                return ClickedNodeSource.TERMINAL;
             }
-            return cardSourceFromAncestors(owned);
+            RecommendationTitleParser.Source found = nearby.result();
+            if (!found.isEmpty()) return ClickedNodeSource.found(found);
+            return ClickedNodeSource.found(cardSourceFromAncestors(owned));
         } catch (RuntimeException walkError) {
             Diagnostics.debug("Could not read clicked card payload: " + walkError.getMessage());
-            return RecommendationTitleParser.Source.NONE;
+            return ClickedNodeSource.TERMINAL;
         } finally {
             owned.recycle();
         }
     }
 
-    /** Depth- and count-bounded scan collecting payloads near the clicked card's bounds. */
-    private void collectNearbyPayloadTexts(AccessibilityNodeInfo node, int depth,
-            android.graphics.Rect clickBounds, List<CharSequence> out) {
-        if (node == null || depth > 7 || out.size() > 60) return;
+    /** Depth- and count-bounded scan ranking coherent node payloads by spatial proximity. */
+    private void collectNearbySources(AccessibilityNodeInfo node, int depth,
+            NearbySource nearby, int[] budget) {
+        if (node == null) return;
         android.graphics.Rect bounds = new android.graphics.Rect();
         node.getBoundsInScreen(bounds);
-        android.graphics.Rect region = new android.graphics.Rect(clickBounds);
-        region.inset(-60, -60);
-        if (android.graphics.Rect.intersects(bounds, region)) {
-            String text = toString(node.getText());
-            if (!text.isEmpty()) out.add(text);
-            String description = toString(node.getContentDescription());
-            if (!description.isEmpty()) out.add(description);
+        boolean relevant = !bounds.isEmpty()
+                && android.graphics.Rect.intersects(bounds, nearby.region);
+        if (depth > 7 || budget[0] <= 0) {
+            // We cannot prove that an unvisited branch lacks a relevant child.
+            // Never let a partial earlier candidate win after a traversal cap.
+            nearby.truncated = true;
+            return;
         }
-        for (int index = 0; index < node.getChildCount() && out.size() <= 60; index++) {
+        budget[0]--;
+        if (relevant) {
+            String text = toString(node.getText());
+            String description = toString(node.getContentDescription());
+            if (RecommendationTitleParser.isRejectedPayload(text)
+                    || RecommendationTitleParser.isRejectedPayload(description)) {
+                nearby.rejected = true;
+            }
+            RecommendationTitleParser.Source direct = mergeDirectSources(
+                    RecommendationTitleParser.fromDescriptionSource(text),
+                    RecommendationTitleParser.fromDescriptionSource(description));
+            if (direct == null) nearby.considerConflict(bounds);
+            else nearby.consider(direct, bounds);
+            if (nearby.isPlausibleCardContainer(bounds)) {
+                CardEvidence grouped = cardEvidenceFromSubtree(
+                        node, 0, new int[] {32}, new boolean[1]);
+                if (grouped.ambiguous) nearby.considerConflict(bounds);
+                else nearby.consider(grouped.source, bounds);
+            }
+        }
+        for (int index = 0; index < node.getChildCount(); index++) {
             AccessibilityNodeInfo child = node.getChild(index);
             if (child == null) continue;
             try {
-                collectNearbyPayloadTexts(child, depth + 1, clickBounds, out);
+                collectNearbySources(child, depth + 1, nearby, budget);
             } finally {
                 child.recycle();
             }
+        }
+    }
+
+    /** Parses one bounded card subtree as a coherent unit, never neighbouring card subtrees. */
+    private CardEvidence cardEvidenceFromSubtree(
+            AccessibilityNodeInfo node, int depth, int[] budget, boolean[] truncated) {
+        List<CharSequence> values = new ArrayList<>();
+        collectCardValues(node, depth, budget, truncated, values);
+        if (truncated[0]) return CardEvidence.AMBIGUOUS;
+        return cardEvidenceFromValues(values);
+    }
+
+    private CardEvidence cardEvidenceFromValues(List<CharSequence> values) {
+        if (values.isEmpty()) return CardEvidence.EMPTY;
+        if (values.size() > 32) return CardEvidence.AMBIGUOUS;
+        for (CharSequence value : values) {
+            if (RecommendationTitleParser.isRejectedPayload(toString(value))) {
+                return CardEvidence.AMBIGUOUS;
+            }
+        }
+        RecommendationTitleParser.Source providerSource = RecommendationTitleParser.Source.NONE;
+        RecommendationTitleParser.Source bareSource = RecommendationTitleParser.Source.NONE;
+        boolean providerAmbiguous = false;
+        boolean bareAmbiguous = false;
+        for (int first = 0; first < values.size(); first++) {
+            List<CharSequence> pair = new ArrayList<>(2);
+            pair.add(values.get(first));
+            for (int second = -1; second < values.size(); second++) {
+                RecommendationTitleParser.Source candidate;
+                if (second < 0 || second == first) {
+                    candidate = RecommendationTitleParser.fromDescriptionSource(toString(values.get(first)));
+                } else {
+                    pair.add(values.get(second));
+                    candidate = RecommendationTitleParser.fromEventTextSource(pair);
+                    pair.remove(1);
+                }
+                if (candidate.isEmpty()) continue;
+                if (candidate.hasProvider()) {
+                    RecommendationTitleParser.Source merged = mergeDirectSources(providerSource, candidate);
+                    if (providerSource.isEmpty()) providerSource = candidate;
+                    else if (merged == null || merged.isEmpty()) providerAmbiguous = true;
+                    else providerSource = merged;
+                } else {
+                    RecommendationTitleParser.Source merged = mergeDirectSources(bareSource, candidate);
+                    if (bareSource.isEmpty()) bareSource = candidate;
+                    else if (merged == null || merged.isEmpty()) bareAmbiguous = true;
+                    else bareSource = merged;
+                }
+            }
+        }
+        if (!providerSource.isEmpty()) {
+            if (providerAmbiguous) return CardEvidence.AMBIGUOUS;
+            return new CardEvidence(providerSource, false);
+        }
+        if (bareAmbiguous) return CardEvidence.AMBIGUOUS;
+        return new CardEvidence(bareSource, false);
+    }
+
+    /** Test seam for coherent values collected from one bounded card subtree. */
+    RecommendationTitleParser.Source selectCardValues(List<CharSequence> values) {
+        CardEvidence evidence = cardEvidenceFromValues(values);
+        return evidence.ambiguous ? RecommendationTitleParser.Source.NONE : evidence.source;
+    }
+
+    private void collectCardValues(AccessibilityNodeInfo node, int depth,
+            int[] budget, boolean[] truncated, List<CharSequence> out) {
+        if (node == null) return;
+        if (depth > 2 || budget[0]-- <= 0) {
+            truncated[0] = true;
+            return;
+        }
+        String text = toString(node.getText());
+        if (!text.isEmpty()) out.add(text);
+        String description = toString(node.getContentDescription());
+        if (!description.isEmpty()) out.add(description);
+        for (int index = 0; index < node.getChildCount(); index++) {
+            if (budget[0] <= 0) {
+                truncated[0] = true;
+                break;
+            }
+            AccessibilityNodeInfo child = node.getChild(index);
+            if (child == null) continue;
+            try { collectCardValues(child, depth + 1, budget, truncated, out); }
+            finally { child.recycle(); }
+        }
+    }
+
+    static final class ClickedNodeSource {
+        static final ClickedNodeSource EMPTY =
+                new ClickedNodeSource(RecommendationTitleParser.Source.NONE, false);
+        static final ClickedNodeSource TERMINAL =
+                new ClickedNodeSource(RecommendationTitleParser.Source.NONE, true);
+        final RecommendationTitleParser.Source source;
+        final boolean terminal;
+        ClickedNodeSource(RecommendationTitleParser.Source source, boolean terminal) {
+            this.source = source;
+            this.terminal = terminal;
+        }
+        static ClickedNodeSource found(RecommendationTitleParser.Source source) {
+            return source == null || source.isEmpty() ? EMPTY : new ClickedNodeSource(source, false);
+        }
+    }
+
+    private static final class CardEvidence {
+        static final CardEvidence EMPTY =
+                new CardEvidence(RecommendationTitleParser.Source.NONE, false);
+        static final CardEvidence AMBIGUOUS =
+                new CardEvidence(RecommendationTitleParser.Source.NONE, true);
+        final RecommendationTitleParser.Source source;
+        final boolean ambiguous;
+        CardEvidence(RecommendationTitleParser.Source source, boolean ambiguous) {
+            this.source = source;
+            this.ambiguous = ambiguous;
+        }
+    }
+
+    /** Test seam for the same real-node spatial selector used by the live tree walk. */
+    RecommendationTitleParser.Source selectNearbySource(
+            List<AccessibilityNodeInfo> roots, android.graphics.Rect clickBounds) {
+        NearbySource nearby = new NearbySource(clickBounds);
+        int[] budget = new int[] {256};
+        if (roots != null) {
+            for (AccessibilityNodeInfo root : roots) {
+                if (root != null) collectNearbySources(root, 0, nearby, budget);
+            }
+        }
+        return nearby.truncated || nearby.ambiguous || nearby.rejected
+                ? RecommendationTitleParser.Source.NONE : nearby.result();
+    }
+
+    /** Chooses only a unique closest card candidate; equal-distance conflicts fail closed. */
+    private static final class NearbySource {
+        final android.graphics.Rect click;
+        final android.graphics.Rect region;
+        RecommendationTitleParser.Source selected = RecommendationTitleParser.Source.NONE;
+        long bestDistance = Long.MAX_VALUE;
+        boolean ambiguous;
+        boolean truncated;
+        boolean rejected;
+
+        NearbySource(android.graphics.Rect clickBounds) {
+            click = new android.graphics.Rect(clickBounds);
+            region = new android.graphics.Rect(clickBounds);
+            region.inset(-60, -60);
+        }
+
+        void consider(RecommendationTitleParser.Source candidate, android.graphics.Rect bounds) {
+            if (candidate == null || candidate.isEmpty()) return;
+            long distance = distance(bounds, candidate.hasProvider());
+            if (distance < bestDistance) {
+                selected = candidate;
+                bestDistance = distance;
+                ambiguous = false;
+            } else if (distance == bestDistance) {
+                RecommendationTitleParser.Source merged = mergeDirectSources(selected, candidate);
+                if (merged == null || merged.isEmpty()) ambiguous = true;
+                else selected = merged;
+            }
+        }
+
+        void considerConflict(android.graphics.Rect bounds) {
+            long distance = distance(bounds, true);
+            if (distance < bestDistance) {
+                selected = RecommendationTitleParser.Source.NONE;
+                bestDistance = distance;
+                ambiguous = true;
+            } else if (distance == bestDistance) {
+                ambiguous = true;
+            }
+        }
+
+        boolean isPlausibleCardContainer(android.graphics.Rect bounds) {
+            int maxWidth = Math.max(click.width() * 4, 240);
+            int maxHeight = Math.max(click.height() * 4, 240);
+            return bounds.contains(click.centerX(), click.centerY())
+                    && bounds.width() <= maxWidth && bounds.height() <= maxHeight;
+        }
+
+        private long distance(android.graphics.Rect bounds, boolean strongEvidence) {
+            long dx = (long) bounds.centerX() - click.centerX();
+            long dy = (long) bounds.centerY() - click.centerY();
+            long centerDistance = dx * dx + dy * dy;
+            // A node containing the click centre is always stronger evidence
+            // than a merely nearby node, regardless of traversal order.
+            long containment = bounds.contains(click.centerX(), click.centerY())
+                    ? 0L : Long.MAX_VALUE / 2L;
+            // Inside one card, provider-bearing evidence from its coherent
+            // subtree outranks a bare title child and preserves whitelist policy.
+            long evidence = strongEvidence ? 0L : Long.MAX_VALUE / 4L;
+            return containment + evidence + centerDistance;
+        }
+
+        RecommendationTitleParser.Source result() {
+            return ambiguous ? RecommendationTitleParser.Source.NONE : selected;
         }
     }
 
