@@ -168,6 +168,37 @@ public class UpdaterLifecycleRuntimeTest {
         });
     }
 
+    @Test public void terminalPreferenceObserversCannotReviveTheCompletedHandoff() throws Exception {
+        int session = pendingSession();
+        assertFalse(UpdateInstallState.record(context, session + 1, PackageInstaller.STATUS_FAILURE));
+        assertTrue("A foreign result must not release the live owner", ApkUpdater.isHandoffInProgress(session));
+        AtomicBoolean observedTerminal = new AtomicBoolean();
+        AtomicBoolean observedCleared = new AtomicBoolean();
+        SharedPreferences.OnSharedPreferenceChangeListener observer = (preferences, key) -> {
+            if (!UpdateInstallState.STATUS.equals(key)) return;
+            int status = preferences.getInt(UpdateInstallState.STATUS, UpdateInstallState.NONE);
+            assertFalse("Status observers must never see a terminal handoff as live",
+                    ApkUpdater.isHandoffInProgress(session));
+            if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
+                observedTerminal.set(true);
+                // Settings consumes the outcome and synchronously observes its removal.
+                UpdateInstallState.clear(context);
+            } else if (status == UpdateInstallState.NONE) {
+                observedCleared.set(true);
+            }
+        };
+        prefs().registerOnSharedPreferenceChangeListener(observer);
+        try {
+            main(() -> assertTrue(UpdateInstallState.record(context, session,
+                    PackageInstaller.STATUS_FAILURE_ABORTED)));
+            instrumentation.waitForIdleSync();
+            assertTrue(observedTerminal.get());
+            assertTrue(observedCleared.get());
+        } finally {
+            prefs().unregisterOnSharedPreferenceChangeListener(observer);
+        }
+    }
+
     @Test public void currentListenerReceivesTheTerminalInstallerOutcome() throws Exception {
         int session = pendingSession();
         RecordingListener listener = new RecordingListener();

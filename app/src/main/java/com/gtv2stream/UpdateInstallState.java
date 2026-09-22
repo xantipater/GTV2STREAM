@@ -26,6 +26,10 @@ final class UpdateInstallState {
 
     static boolean record(Context context, int session, int status) {
         if (session < 0 || session != session(context)) return false;
+        // Main-thread preference observers can run inside commit(), clear the
+        // outcome, and re-enter Settings. Publish terminal state only after its
+        // live handoff owner is gone, so that re-entry cannot restore Pending.
+        if (status != PackageInstaller.STATUS_PENDING_USER_ACTION) ApkUpdater.releaseHandoff(session);
         return prefs(context).edit().putInt(STATUS, status).commit();
     }
 

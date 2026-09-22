@@ -160,6 +160,10 @@ final class ApkUpdater {
         return sessionId >= 0 && handoffSession == sessionId;
     }
 
+    static synchronized void releaseHandoff(int sessionId) {
+        if (handoffSession == sessionId) handoffSession = -1;
+    }
+
     private static boolean isInstallPending(Context context) {
         return isHandoffInProgress()
                 || UpdateInstallState.status(context) == PackageInstaller.STATUS_PENDING_USER_ACTION;
@@ -175,10 +179,7 @@ final class ApkUpdater {
         if (!UpdateInstallState.record(context, sessionId, status)) return;
         final Listener listener = pendingListener;
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) return;
-        synchronized (ApkUpdater.class) {
-            if (handoffSession == sessionId) handoffSession = -1;
-            active = null;
-        }
+        synchronized (ApkUpdater.class) { active = null; }
         if (listener == null) return;
         main().post(() -> {
             // The Activity can be destroyed or a retry can take ownership while
@@ -452,9 +453,7 @@ final class ApkUpdater {
             commit.run();
             return true;
         } finally {
-            synchronized (ApkUpdater.class) {
-                if (handoffSession == sessionId) handoffSession = -1;
-            }
+            releaseHandoff(sessionId);
         }
     }
 

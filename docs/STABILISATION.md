@@ -414,7 +414,9 @@ additional paths without changing versions, permissions, signing or dependencies
   worker owns the handoff, Settings shows system confirmation instead of claiming
   cancellation, and a second update cannot replace it. Abandoned unsealed sessions
   recovered without a live worker become retryable failures; sealed/live sessions
-  remain pending. Android still owns installation approval.
+  remain pending. Terminal outcomes retire matching live ownership before notifying
+  preference observers, so a reentrant Settings refresh cannot restore pending UI.
+  Android still owns installation approval.
 - Resolve current SmartTube handlers on each selection in the existing package
   order. Refresh visible Settings on heartbeat changes/expiry, and keep the release
   button's label consistent with its action after a permission failure.
@@ -432,6 +434,12 @@ The regression-only CI commit is `994ed736aaa816a6ccecbc373b9a2c704e1fcfd1`
 unchanged, with behavior-preserving test boundaries added. Results for this
 negative control and the final fixed revision are recorded on
 [PR #20](https://github.com/xantipater/GTV2STREAM/pull/20).
+
+The initial fixed run `35707839477` passed build/lint/archive checks and 109 of
+111 tests on each API, but two existing installer-recovery tests exposed the
+synchronous terminal-notification ordering bug described above. Those assertions
+remain unchanged; a dedicated preference-observer regression also covers the fix.
+That initial run is not a final validation pass.
 
 Local compilation uses the official API-34 Android jar and AndroidX/JUnit jars
 with compile-only resource constants. The actual helper suite passes 606
